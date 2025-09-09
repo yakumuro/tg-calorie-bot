@@ -1,11 +1,9 @@
 import logging
-import os
 from telegram.ext import Application
-from config.config import TELEGRAM_TOKEN, DATABASE_PATH, LOG_LEVEL
-from bot.handlers import conv_handler, profile_handler
+from config.config import TELEGRAM_TOKEN, LOG_LEVEL
 from bot.database import init_db
+from bot.handlers import last_7_days_handler, retry_handler, confirm_handler, conv_handler, profile_handler, meal_conv_handler, stats_handler, edit_conv_handler
 
-# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=getattr(logging, LOG_LEVEL.upper(), logging.INFO)
@@ -14,29 +12,28 @@ logger = logging.getLogger(__name__)
 
 
 async def error_handler(update, context):
-    """Логирует исключения и уведомляет пользователя."""
-    logger.error(f"Update {update} вызвал ошибку: {context.error}", exc_info=True)
+    logger.error(f"Error: {context.error}")
     if update and update.effective_message:
-        await update.effective_message.reply_text(
-            "Произошла ошибка. Попробуй ещё раз или напиши /start."
-        )
+        await update.effective_message.reply_text("Ошибка. Попробуй ещё раз.")
 
 
 def main():
-    """Запускает бота."""
-    # Инициализируем базу данных
     init_db()
 
-    # Создаём приложение
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Добавляем обработчики
-    application.add_handler(conv_handler)
-    application.add_handler(profile_handler)
-    application.add_error_handler(error_handler)
+    app.add_handler(conv_handler)
+    app.add_handler(profile_handler)
+    app.add_handler(meal_conv_handler)
+    app.add_handler(stats_handler)
+    app.add_handler(edit_conv_handler)
+    app.add_handler(confirm_handler)
+    app.add_handler(retry_handler)
+    app.add_handler(last_7_days_handler)
+    app.add_error_handler(error_handler)
 
-    logger.info("Бот запущен. Ожидание обновлений...")
-    application.run_polling(allowed_updates=["message", "callback_query"])
+    logger.info("Бот запущен")
+    app.run_polling()
 
 
 if __name__ == "__main__":

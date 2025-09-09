@@ -2,15 +2,11 @@ import sqlite3
 import os
 from config.config import DATABASE_PATH
 
-logger = __import__('logging').getLogger(__name__)
-
-
 def init_db():
-    """Создаёт папку data и таблицу users."""
     try:
         os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
         conn = sqlite3.connect(DATABASE_PATH)
-        conn.row_factory = sqlite3.Row  # доступ по имени колонки
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
         cursor.execute('''
@@ -25,49 +21,110 @@ def init_db():
                 daily_calories REAL NOT NULL
             )
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS meals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                food_text TEXT NOT NULL,
+                calories REAL NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (user_id)
+            )
+        ''')
+
         conn.commit()
         conn.close()
-        logger.info("База данных инициализирована успешно.")
+        print("✅ База данных инициализирована")
     except Exception as e:
-        logger.error(f"Ошибка при инициализации БД: {e}")
+        print(f"❌ Ошибка БД: {e}")
         raise
 
 
 def get_db_connection():
-    """Возвращает подключение к БД с row_factory."""
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def add_user(user_id, name, weight, height, age, gender, activity_level, daily_calories):
-    """Добавляет или обновляет пользователя."""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO users 
-            (user_id, name, weight, height, age, gender, activity_level, daily_calories)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (user_id, name, weight, height, age, gender, activity_level, daily_calories))
-        conn.commit()
-        conn.close()
-        logger.info(f"Пользователь {user_id} добавлен/обновлён.")
-    except Exception as e:
-        logger.error(f"Ошибка при добавлении пользователя {user_id}: {e}")
-        raise
+    conn = get_db_connection()
+    conn.execute('''
+        INSERT OR REPLACE INTO users 
+        (user_id, name, weight, height, age, gender, activity_level, daily_calories)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (user_id, name, weight, height, age, gender, activity_level, daily_calories))
+    conn.commit()
+    conn.close()
 
 
 def get_user(user_id):
-    """Получает пользователя по ID."""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
-        user = cursor.fetchone()
-        conn.close()
-        logger.info(f"Пользователь {user_id} получен: {'да' if user else 'нет'}")
-        return user
-    except Exception as e:
-        logger.error(f"Ошибка при получении пользователя {user_id}: {e}")
-        raise
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)).fetchone()
+    conn.close()
+    return user
+
+
+def add_meal(user_id, food_text, calories):
+    conn = get_db_connection()
+    conn.execute(
+        "INSERT INTO meals (user_id, food_text, calories) VALUES (?, ?, ?)",
+        (user_id, food_text, calories)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_stats(user_id):
+    conn = get_db_connection()
+    day = conn.execute("""
+        SELECT SUM(calories) FROM meals 
+        WHERE user_id = ? AND date(timestamp) = date('now')
+    """, (user_id,)).fetchone()[0] or 0
+
+    week = conn.execute("""
+        SELECT SUM(calories) FROM meals 
+        WHERE user_id = ? AND date(timestamp) >= date('now', '-6 days')
+    """, (user_id,)).fetchone()[0] or 0
+
+    month = conn.execute("""
+        SELECT SUM(calories) FROM meals 
+        WHERE user_id = ? AND date(timestamp) >= date('now', '-29 days')
+    """, (user_id,)).fetchone()[0] or 0
+
+    conn.close()
+    return {"day": day, "week": week, "month": month}
+
+def get_stats(user_id):
+    conn = get_db_connection()
+    day = conn.execute("""
+        SELECT SUM(calories) FROM meals 
+        WHERE user_id = ? AND date(timestamp) = date('now')
+    """, (user_id,)).fetchone()[0] or 0
+
+    week = conn.execute("""
+        SELECT SUM(calories) FROM meals 
+        WHERE user_id = ? AND date(timestamp) >= date('now', '-6 days')
+    """, (user_id,)).fetchone()[0] or 0
+
+    month = conn.execute("""
+        SELECT SUM(calories) FROM meals 
+        WHERE user_id = ? AND date(timestamp) >= date('now', '-29 days')
+    """, (user_id,)).fetchone()[0] or 0
+
+    conn.close()
+    return {"day": day, "week": week, "month": month}
+
+
+def get_meals_last_7_days(user_id):
+    """Возвращает приёмы пищи за последние 7 дней"""
+    conn = get_db_connection()
+    meals = conn.execute("""
+        SELECT food_text, calories, timestamp 
+        FROM meals 
+        WHERE user_id = ? 
+          AND date(timestamp) >= date('now', '-6 days')
+        ORDER BY timestamp DESC
+    """, (user_id,)).fetchall()
+    conn.close()
+    return meals
