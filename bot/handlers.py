@@ -4,7 +4,8 @@ from telegram.ext import (
     ConversationHandler, ContextTypes, filters
 )
 from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days
-from bot.utils import calculate_daily_calories, analyze_food_with_gpt, get_main_menu
+from bot.utils import calculate_daily_calories, get_main_menu
+from bot.yandex_gpt import analyze_food_with_gpt
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
 import logging
 from datetime import datetime
