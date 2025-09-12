@@ -414,7 +414,7 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         product_list = "\n".join(
-        [f"• {i['product']} — {i['quantity']} — {i['calories']} ккал, Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
+            [f"• {i['product']} — {i['quantity']} — {i['calories']} ккал, Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
         )
 
         summary = f"""
@@ -434,7 +434,10 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.message.reply_text(summary.strip(), reply_markup=reply_markup, parse_mode="HTML")
+        # Сохраняем message_id для возможности удаления
+        sent_message = await update.message.reply_text(summary.strip(), reply_markup=reply_markup, parse_mode="HTML")
+        context.user_data['last_meal_message_id'] = sent_message.message_id
+
         return AWAIT_CONFIRM
 
     except Exception as e:
@@ -477,7 +480,21 @@ async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def retry_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("Подробно опишите, что съели. Пишите максимально подробно, указывая вес порций и ингредиенты:")
+
+    # Удаляем старое сообщение с распознанной едой, если есть
+    last_message_id = context.user_data.get('last_meal_message_id')
+    if last_message_id:
+        try:
+            await query.message.chat.delete_message(last_message_id)
+        except Exception as e:
+            logger.warning(f"Не удалось удалить старое сообщение: {e}")
+
+    # Убираем сохраненный id, чтобы не пытаться удалить снова
+    context.user_data.pop('last_meal_message_id', None)
+
+    await query.message.reply_text(
+        "Подробно опишите, что съели. Пишите максимально подробно, указывая вес порций и ингредиенты:"
+    )
     return ADD_MEAL
 
 
@@ -490,25 +507,51 @@ async def cancel_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = get_user(user_id)
-    daily_norm = user["daily_calories"]
-    protein_norm = user["protein_norm"]
-    fat_norm = user["fat_norm"]
-    carbs_norm = user["carbs_norm"]
+
+    if not user:
+        await update.message.reply_text("Нет профиля. /start", reply_markup=None)
+        return
+
+    # Получаем норму из профиля
+    daily_norm = user["daily_calories"] or 0
+    protein_norm = user["protein_norm"] or 0
+    fat_norm = user["fat_norm"] or 0
+    carbs_norm = user["carbs_norm"] or 0
+
     stats_data = get_stats(user_id)
+
+    # Если статистика ещё пустая, подставляем 0
+    day_stats = stats_data.get('day', {})
+    week_stats = stats_data.get('week', {})
+    month_stats = stats_data.get('month', {})
+
+    day_calories = day_stats.get('calories') or 0
+    day_protein = day_stats.get('protein') or 0
+    day_fat = day_stats.get('fat') or 0
+    day_carbs = day_stats.get('carbs') or 0
+
+    week_calories = week_stats.get('calories') or 0
+    week_protein = week_stats.get('protein') or 0
+    week_fat = week_stats.get('fat') or 0
+    week_carbs = week_stats.get('carbs') or 0
+
+    month_calories = month_stats.get('calories') or 0
+    month_protein = month_stats.get('protein') or 0
+    month_fat = month_stats.get('fat') or 0
+    month_carbs = month_stats.get('carbs') or 0
 
     keyboard = [[InlineKeyboardButton("📅 Меню за 7 дней", callback_data="last_7_days")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
         f"📊 <b>Статистика</b>:\n\n"
-        f"<b>Сегодня</b>:\n\n 🍽Калорий: {stats_data['day']['calories']} / {daily_norm} ккал\n"
-        f"🥩Белков: {stats_data['day']['protein']} / {protein_norm} г\n🥑Жиров: {stats_data['day']['fat']} / {fat_norm} г\n🍞Углеводов: {stats_data['day']['carbs']} / {carbs_norm} г\n\n"
-        f"<b>📅Неделя</b>: {stats_data['week']['calories']} ккал (Б: {stats_data['week']['protein']} г, Ж: {stats_data['week']['fat']} г, У: {stats_data['week']['carbs']} г)\n"
-        f"<b>📅Месяц</b>: {stats_data['month']['calories']} ккал (Б: {stats_data['month']['protein']} г, Ж: {stats_data['month']['fat']} г, У: {stats_data['month']['carbs']} г)",
+        f"<b>Сегодня</b>:\n\n 🍽Калорий: {day_calories} / {daily_norm} ккал\n"
+        f"🥩Белков: {day_protein} / {protein_norm} г\n🥑Жиров: {day_fat} / {fat_norm} г\n🍞Углеводов: {day_carbs} / {carbs_norm} г\n\n"
+        f"<b>📅Неделя</b>: {week_calories} ккал (Б: {week_protein} г, Ж: {week_fat} г, У: {week_carbs} г)\n"
+        f"<b>📅Месяц</b>: {month_calories} ккал (Б: {month_protein} г, Ж: {month_fat} г, У: {month_carbs} г)",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
-
 
 async def show_last_7_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
