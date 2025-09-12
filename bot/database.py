@@ -145,3 +145,16 @@ def get_meals_last_7_days(user_id):
     """, (user_id,)).fetchall()
     conn.close()
     return meals
+
+def delete_meals_for_day(user_id: int) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "DELETE FROM meals WHERE user_id=? AND date(timestamp, 'localtime') = date('now', 'localtime')",
+        (user_id,)
+    )
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted_count > 0

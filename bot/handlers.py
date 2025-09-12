@@ -5,11 +5,11 @@ from telegram.ext import (
 )
 from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days
 from bot.utils import calculate_daily_calories, get_main_menu
-from bot.database import calculate_macros
+from bot.database import calculate_macros, delete_meals_for_day
 from bot.yandex_gpt import analyze_food_with_gpt
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -540,7 +540,10 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     month_fat = month_stats.get('fat') or 0
     month_carbs = month_stats.get('carbs') or 0
 
-    keyboard = [[InlineKeyboardButton("📅 Меню за 7 дней", callback_data="last_7_days")]]
+    keyboard = [
+    [InlineKeyboardButton("📅 Меню за 7 дней", callback_data="last_7_days")],
+    [InlineKeyboardButton("🗑 Удалить данные за сегодня", callback_data="clear_today")]
+]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
@@ -580,6 +583,20 @@ async def show_last_7_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message += "\n\n"
 
     await query.message.reply_text(message, parse_mode="HTML", reply_markup=get_main_menu())
+
+async def clear_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Удаляем приёмы пищи за сегодня
+    deleted = delete_meals_for_day(user_id)
+
+    if deleted:
+        await query.message.reply_text(f"✅ История еды за сегодня удалена.", reply_markup=get_main_menu())
+    else:
+        await query.message.reply_text(f"ℹ️ За сегодня нет добавленных приёмов пищи.", reply_markup=get_main_menu())
 
 
 # --- Обработчики ---
@@ -668,5 +685,6 @@ conv_handler = ConversationHandler(
 
 # Отдельные обработчики
 confirm_handler = CallbackQueryHandler(confirm_meal, pattern="^confirm_meal$")
+clear_today_handler = CallbackQueryHandler(clear_today, pattern="^clear_today$")
 retry_handler = CallbackQueryHandler(retry_meal, pattern="^retry_meal$")
 last_7_days_handler = CallbackQueryHandler(show_last_7_days, pattern="^last_7_days$")
