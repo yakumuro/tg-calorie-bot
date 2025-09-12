@@ -1,9 +1,19 @@
 import logging
-from telegram.ext import Application
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from config.config import TELEGRAM_TOKEN, LOG_LEVEL
 from bot.database import init_db
-from bot.handlers import last_7_days_handler, retry_handler, confirm_handler, conv_handler, profile_handler, meal_conv_handler, stats_handler, edit_conv_handler
+from bot.handlers import (
+    conv_handler,
+    profile_handler,
+    meal_conv_handler,
+    stats_handler,
+    edit_conv_handler,
+    confirm_handler,
+    retry_handler,
+    last_7_days_handler
+)
 
+# Логирование
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=getattr(logging, LOG_LEVEL.upper(), logging.INFO)
@@ -11,6 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Глобальный обработчик ошибок
 async def error_handler(update, context):
     logger.error(f"Error: {context.error}")
     if update and update.effective_message:
@@ -18,23 +29,27 @@ async def error_handler(update, context):
 
 
 def main():
+    # Инициализация базы
     init_db()
 
+    # Создаём приложение
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    app.add_handler(conv_handler)
-    app.add_handler(profile_handler)
-    app.add_handler(meal_conv_handler)
-    app.add_handler(stats_handler)
-    app.add_handler(edit_conv_handler)
-    app.add_handler(confirm_handler)
-    app.add_handler(retry_handler)
-    app.add_handler(last_7_days_handler)
+    # 🔹 Регистрация всех обработчиков
+    app.add_handler(conv_handler)          # регистрация (имя, вес, рост, пол, активность)
+    app.add_handler(profile_handler)       # просмотр профиля
+    app.add_handler(meal_conv_handler)     # добавление приёмов пищи
+    app.add_handler(stats_handler)         # статистика
+    app.add_handler(edit_conv_handler)     # редактирование профиля (с edit_field_handler внутри!)
+    app.add_handler(confirm_handler)       # подтверждение еды
+    app.add_handler(retry_handler)         # повтор ввода еды
+    app.add_handler(last_7_days_handler)   # просмотр меню за 7 дней
+
+    # Обработчик ошибок
     app.add_error_handler(error_handler)
 
-    logger.info("Бот запущен")
+    logger.info("Бот запущен ✅")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()

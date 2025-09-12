@@ -133,7 +133,7 @@ async def activity_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Готово!\n\n"
             f"🎯 Твоя ежедневная норма:\n"
             f"<b>{daily_calories} ккал</b>\n"
-            f"🥩Б: {protein_norm} г, 🧈Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+            f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
             parse_mode="HTML",
             reply_markup=get_main_menu()
         )
@@ -171,7 +171,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>Возраст</b>: {age}\n<b>Пол</b>: {gender_str}\n"
         f"<b>Активность</b>: {activity_level}\n\n"
         f"<b>🎯 Норма</b>: {daily_calories} ккал\n"
-        f"<b>🥩Б</b>: {protein_norm} г, <b>🧈Ж</b>: {fat_norm} г, <b>🍞У</b>: {carbs_norm} г",
+        f"<b>🥩Б</b>: {protein_norm} г, <b>🥑Ж</b>: {fat_norm} г, <b>🍞У</b>: {carbs_norm} г",
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -181,24 +181,68 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def edit_profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("Введите новое имя:")
-    return EDIT_NAME
+
+    keyboard = [
+        [InlineKeyboardButton("👤 Имя", callback_data="edit_field_name"),
+         InlineKeyboardButton("⚖️ Вес", callback_data="edit_field_weight")],
+        [InlineKeyboardButton("📏 Рост", callback_data="edit_field_height"),
+         InlineKeyboardButton("🎂 Возраст", callback_data="edit_field_age")],
+        [InlineKeyboardButton("🚻 Пол", callback_data="edit_field_gender"),
+         InlineKeyboardButton("🏃 Активность", callback_data="edit_field_activity")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.message.reply_text("Что хочешь изменить?", reply_markup=reply_markup)
+    return "FIELD"
 
 
 # --- Редактирование профиля: шаги ---
 async def edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['name'] = update.message.text
-    await update.message.reply_text("Новый вес (в кг):")
-    return EDIT_WEIGHT
+    new_name = update.message.text
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+
+    if not user:
+        await update.message.reply_text("Ошибка: профиль не найден.")
+        return ConversationHandler.END
+
+    (_, _, weight, height, age, gender, activity_level,
+     daily_calories, protein_norm, fat_norm, carbs_norm) = user
+
+    add_user(user_id, new_name, weight, height, age, gender, activity_level, daily_calories)
+
+    await update.message.reply_text("✅Имя обновлено!", reply_markup=get_main_menu())
+    return ConversationHandler.END
 
 
 async def edit_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         weight = float(update.message.text)
         if weight <= 0: raise ValueError
-        context.user_data['weight'] = weight
-        await update.message.reply_text("Новый рост (в см):")
-        return EDIT_HEIGHT
+
+        user_id = update.effective_user.id
+        user = get_user(user_id)
+        if not user:
+            await update.message.reply_text("Ошибка: профиль не найден.")
+            return ConversationHandler.END
+
+        (_, name, _, height, age, gender, activity_level,
+         _, _, _, _) = user
+
+        # пересчёт
+        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == activity_level][0]
+        new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
+        protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
+
+        add_user(user_id, name, weight, height, age, gender, activity_level, new_calories)
+
+        await update.message.reply_text(
+            f"✅ Вес обновлён!\nНовая норма: {new_calories} ккал\n"
+            f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+        return ConversationHandler.END
     except ValueError:
         await update.message.reply_text("Введите число (например, 70.5):")
         return EDIT_WEIGHT
@@ -208,9 +252,29 @@ async def edit_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         height = int(update.message.text)
         if height <= 0: raise ValueError
-        context.user_data['height'] = height
-        await update.message.reply_text("Новый возраст:")
-        return EDIT_AGE
+
+        user_id = update.effective_user.id
+        user = get_user(user_id)
+        if not user:
+            await update.message.reply_text("Ошибка: профиль не найден.")
+            return ConversationHandler.END
+
+        (_, name, weight, _, age, gender, activity_level,
+         _, _, _, _) = user
+
+        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == activity_level][0]
+        new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
+        protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
+
+        add_user(user_id, name, weight, height, age, gender, activity_level, new_calories)
+
+        await update.message.reply_text(
+            f"✅ Рост обновлён!\nНовая норма: {new_calories} ккал\n"
+            f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+        return ConversationHandler.END
     except ValueError:
         await update.message.reply_text("Введите число (например, 175):")
         return EDIT_HEIGHT
@@ -220,64 +284,89 @@ async def edit_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         age = int(update.message.text)
         if age <= 0: raise ValueError
-        context.user_data['age'] = age
 
-        keyboard = [
-            [InlineKeyboardButton("Мужской", callback_data="edit_male"),
-             InlineKeyboardButton("Женский", callback_data="edit_female")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Выберите пол:", reply_markup=reply_markup)
-        return EDIT_GENDER
+        user_id = update.effective_user.id
+        user = get_user(user_id)
+        if not user:
+            await update.message.reply_text("Ошибка: профиль не найден.")
+            return ConversationHandler.END
+
+        (_, name, weight, height, _, gender, activity_level,
+         _, _, _, _) = user
+
+        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == activity_level][0]
+        new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
+        protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
+
+        add_user(user_id, name, weight, height, age, gender, activity_level, new_calories)
+
+        await update.message.reply_text(
+            f"✅ Возраст обновлён!\nНовая норма: {new_calories} ккал\n"
+            f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+        return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text("Введите число:")
+        await update.message.reply_text("Введите число (например, 25):")
         return EDIT_AGE
 
 
 async def edit_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    context.user_data['gender'] = 'male' if 'male' in query.data else 'female'
-    await query.message.reply_text("Выберите уровень активности:")
+    gender = "male" if query.data == "edit_gender_male" else "female"
 
-    keyboard = [
-        [InlineKeyboardButton("Нет активности", callback_data="edit_none")],
-        [InlineKeyboardButton("Минимальная", callback_data="edit_low")],
-        [InlineKeyboardButton("Средняя", callback_data="edit_medium")],
-        [InlineKeyboardButton("Высокая", callback_data="edit_high")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.reply_text("Уровень активности:", reply_markup=reply_markup)
-    return EDIT_ACTIVITY
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    if not user:
+        await query.message.reply_text("Ошибка: профиль не найден.")
+        return ConversationHandler.END
+
+    (_, name, weight, height, age, _, activity_level,
+     _, _, _, _) = user
+
+    activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == activity_level][0]
+    new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
+    protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
+
+    add_user(user_id, name, weight, height, age, gender, activity_level, new_calories)
+
+    await query.message.reply_text(
+        f"✅ Пол обновлён!\nНовая норма: {new_calories} ккал\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        parse_mode="HTML",
+        reply_markup=get_main_menu()
+    )
+    return ConversationHandler.END
 
 
 async def edit_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    activity_code = query.data.replace("edit_", "")
-    context.user_data['activity_level_code'] = activity_code
+    activity_code = query.data.replace("edit_act_", "")
+    activity_label = ACTIVITY_LABELS[activity_code]
 
-    weight = context.user_data['weight']
-    height = context.user_data['height']
-    age = context.user_data['age']
-    gender = context.user_data['gender']
-
-    try:
-        new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
-        user_id = update.effective_user.id
-        name = context.user_data['name']
-        activity_label = ACTIVITY_LABELS[activity_code]
-        add_user(user_id, name, weight, height, age, gender, activity_label, new_calories)
-
-        await query.message.reply_text(
-            f"✅ Профиль обновлён!\nНовая норма: {new_calories} ккал",
-            reply_markup=get_main_menu()
-        )
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    if not user:
+        await query.message.reply_text("Ошибка: профиль не найден.")
         return ConversationHandler.END
-    except Exception as e:
-        logger.error(f"Ошибка при редактировании: {e}")
-        await query.message.reply_text("Ошибка. Попробуй снова.")
-        return ConversationHandler.END
+
+    (_, name, weight, height, age, gender, _, _, _, _, _) = user
+
+    new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
+    protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
+
+    add_user(user_id, name, weight, height, age, gender, activity_label, new_calories)
+
+    await query.message.reply_text(
+        f"✅ Активность обновлена!\nНовая норма: {new_calories} ккал\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        parse_mode="HTML",
+        reply_markup=get_main_menu()
+    )
+    return ConversationHandler.END
 
 
 # --- Добавление еды ---
@@ -319,7 +408,7 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {product_list}
 
 <b>🍽 Итого:</b> {totals['calories']} ккал  
-🥩Б: {totals['protein']} г, 🧈Ж: {totals['fat']} г, 🍞У: {totals['carbs']} г
+🥩Б: {totals['protein']} г, 🥑Ж: {totals['fat']} г, 🍞У: {totals['carbs']} г
 
 Выбери действие:
         """
@@ -363,7 +452,7 @@ async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text(
         f"✅ Приём пищи сохранён!\n"
         f"🍽 Добавлено: {pending['calories']} ккал\n"
-        f"🥩Б: {pending['protein']} г, 🧈Ж: {pending['fat']} г, 🍞У: {pending['carbs']} г",
+        f"🥩Б: {pending['protein']} г, 🥑Ж: {pending['fat']} г, 🍞У: {pending['carbs']} г",
         parse_mode="HTML",
         reply_markup=get_main_menu()
     )
@@ -397,12 +486,10 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"📊 <b>Статистика</b>:\n\n"
-        f"-----------------------------------------------\n"
-        f"<b>Сегодня</b>: {stats_data['day']['calories']} / {daily_norm} ккал\n\n"
-        f"🥩Б: {stats_data['day']['protein']} / {protein_norm} г\n 🧈Ж: {stats_data['day']['fat']} / {fat_norm} г,\n🍞У: {stats_data['day']['carbs']} / {carbs_norm} г\n"
-        f"-----------------------------------------------\n\n"
-        f"<b>За последнюю неделю</b>: {stats_data['week']['calories']} ккал (Б: {stats_data['week']['protein']} г, Ж: {stats_data['week']['fat']} г, У: {stats_data['week']['carbs']} г)\n"
-        f"<b>За последний месяц</b>: {stats_data['month']['calories']} ккал (Б: {stats_data['month']['protein']} г, Ж: {stats_data['month']['fat']} г, У: {stats_data['month']['carbs']} г)",
+        f"<b>Сегодня</b>:\n\n 🍽Калорий: {stats_data['day']['calories']} / {daily_norm} ккал\n"
+        f"🥩Белков: {stats_data['day']['protein']} / {protein_norm} г\n🥑Жиров: {stats_data['day']['fat']} / {fat_norm} г\n🍞Углеводов: {stats_data['day']['carbs']} / {carbs_norm} г\n\n"
+        f"<b>📅Неделя</b>: {stats_data['week']['calories']} ккал (Б: {stats_data['week']['protein']} г, Ж: {stats_data['week']['fat']} г, У: {stats_data['week']['carbs']} г)\n"
+        f"<b>📅Месяц</b>: {stats_data['month']['calories']} ккал (Б: {stats_data['month']['protein']} г, Ж: {stats_data['month']['fat']} г, У: {stats_data['month']['carbs']} г)",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
@@ -424,13 +511,13 @@ async def show_last_7_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for meal in meals:
         date_str = meal['timestamp'].split()[0]
         date_friendly = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
-        daily_meals[date_friendly].append(f"• {meal['food_text']} — {meal['calories']} ккал")
+        daily_meals[date_friendly].append(f"▪️ {meal['food_text']} — {meal['calories']} ккал")
         total_per_day[date_friendly] += meal['calories']
 
-    message = "📅 <b>Меню за последние 7 дней</b>:\n\n"
+    message = "🗓 <b>Меню за последние 7 дней</b>:\n\n"
     for date, items in daily_meals.items():
         total = total_per_day[date]
-        message += f"<u><b>{date}</b> (всего: {total} ккал)</u>\n"
+        message += f"📌<u><b>{date}</b> (всего: {total} ккал)</u>\n"
         message += "\n".join(items)
         message += "\n\n"
 
@@ -454,15 +541,54 @@ meal_conv_handler = ConversationHandler(
     per_user=True
 )
 
+async def edit_field_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    field = query.data.replace("edit_field_", "")
+    context.user_data['edit_field'] = field
+
+    if field == "name":
+        await query.message.reply_text("Введите новое имя:")
+        return EDIT_NAME
+    elif field == "weight":
+        await query.message.reply_text("Введите новый вес (кг):")
+        return EDIT_WEIGHT
+    elif field == "height":
+        await query.message.reply_text("Введите новый рост (см):")
+        return EDIT_HEIGHT
+    elif field == "age":
+        await query.message.reply_text("Введите новый возраст:")
+        return EDIT_AGE
+    elif field == "gender":
+        keyboard = [
+            [InlineKeyboardButton("Мужской", callback_data="edit_gender_male"),
+             InlineKeyboardButton("Женский", callback_data="edit_gender_female")]
+        ]
+        await query.message.reply_text("Выберите пол:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return EDIT_GENDER
+    elif field == "activity":
+        keyboard = [
+            [InlineKeyboardButton("Нет активности", callback_data="edit_act_none")],
+            [InlineKeyboardButton("Минимальная", callback_data="edit_act_low")],
+            [InlineKeyboardButton("Средняя", callback_data="edit_act_medium")],
+            [InlineKeyboardButton("Высокая", callback_data="edit_act_high")]
+        ]
+        await query.message.reply_text("Выберите уровень активности:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return EDIT_ACTIVITY
+
 edit_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(edit_profile_start, pattern="edit_profile")],
     states={
+        # обработка выбора поля
+        "FIELD": [CallbackQueryHandler(edit_field_handler, pattern="^edit_field_")],
+
+        # ввод новых значений
         EDIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_name)],
         EDIT_WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_weight)],
         EDIT_HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_height)],
         EDIT_AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_age)],
-        EDIT_GENDER: [CallbackQueryHandler(edit_gender)],
-        EDIT_ACTIVITY: [CallbackQueryHandler(edit_activity)]
+        EDIT_GENDER: [CallbackQueryHandler(edit_gender, pattern="^edit_gender_")],
+        EDIT_ACTIVITY: [CallbackQueryHandler(edit_activity, pattern="^edit_act_")],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_user=True
