@@ -17,39 +17,20 @@ async def analyze_food_with_gpt(food_text: str, api_key: str, folder_id: str) ->
 3. Если вес не указан — оцени как **стандартную порцию** (например, 1 яйцо = 50 г, 1 ломтик хлеба = 30 г).
 4. Учитывай калории **всех компонентов**, включая масло, майонез, соусы.
 5. Калории указывай в **ккал**.
-6. Верни **ТОЛЬКО валидный JSON**, без ```json, без пояснений, без комментариев.
+6. Отдельно возвращай количество белков, жиров и углеводов для каждого ингредиента и для блюда в целом.
+7. Верни **ТОЛЬКО валидный JSON**, без ```json, без пояснений, без комментариев.
 
 ### Формат ответа:
 {{
   "items": [
-    {{"product": "название продукта", "quantity": "количество с единицами", "calories": число}}
+    {{"product": "название", "quantity": "100 г", "calories": число, "protein": число, "fat": число, "carbs": число}}
   ],
-  "total_calories": число
-}}
-
-### Примеры:
-Ввод: "200 г творога 9%"
-Выход:
-{{"items": [{{"product": "творог", "quantity": "200 г", "calories": 180}}], "total_calories": 180}}
-
-Ввод: "Гречка с тушенкой"
-Выход:
-{{
-  "items": [
-    {{"product": "гречка", "quantity": "150 г", "calories": 150}},
-    {{"product": "тушенка", "quantity": "100 г", "calories": 280}}
-  ],
-  "total_calories": 430
-}}
-
-Ввод: "Кофе с молоком"
-Выход:
-{{
-  "items": [
-    {{"product": "кофе", "quantity": "200 мл", "calories": 5}},
-    {{"product": "молоко", "quantity": "50 мл", "calories": 65}}
-  ],
-  "total_calories": 70
+  "total": {{
+    "calories": число,
+    "protein": число,
+    "fat": число,
+    "carbs": число
+  }}
 }}
 
 Теперь проанализируй:
@@ -84,7 +65,6 @@ async def analyze_food_with_gpt(food_text: str, api_key: str, folder_id: str) ->
             text = text.rsplit('```', 1)[0]  # Удаляем последнюю строку с ```
             text = text.strip()
 
-        # Также удаляем, если есть ```json
         if text.startswith('```json'):
             text = text[7:].strip()
             if text.endswith('```'):
@@ -98,10 +78,23 @@ async def analyze_food_with_gpt(food_text: str, api_key: str, folder_id: str) ->
         # Проверяем структуру
         if not isinstance(data, dict):
             raise ValueError("JSON должен быть объектом")
-        if 'total_calories' not in data:
-            raise ValueError("Нет поля total_calories")
-        if not isinstance(data.get('items'), list):
-            data['items'] = []
+
+        if "total" not in data:
+            raise ValueError("Нет блока total с БЖУ")
+
+        totals = data["total"]
+        if not isinstance(totals, dict):
+            raise ValueError("total должен быть объектом")
+
+        # Вытаскиваем значения
+        calories = totals.get("calories", 0)
+        protein = totals.get("protein", 0)
+        fat = totals.get("fat", 0)
+        carbs = totals.get("carbs", 0)
+
+        # items всегда должен быть списком
+        if not isinstance(data.get("items"), list):
+            data["items"] = []
 
         print(f"✅ Успешно распарсили: {data}")
         return data

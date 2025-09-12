@@ -5,6 +5,7 @@ from telegram.ext import (
 )
 from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days
 from bot.utils import calculate_daily_calories, get_main_menu
+from bot.database import calculate_macros
 from bot.yandex_gpt import analyze_food_with_gpt
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
 import logging
@@ -123,10 +124,17 @@ async def activity_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         daily_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
         activity_label = ACTIVITY_LABELS[activity_code]
+
+        protein_norm, fat_norm, carbs_norm = calculate_macros(weight, daily_calories)
+
         add_user(user_id, name, weight, height, age, gender, activity_label, daily_calories)
 
         await query.message.reply_text(
-            f"✅ Готово!\nНорма: {daily_calories} ккал",
+            f"✅ Готово!\n\n"
+            f"🎯 Твоя ежедневная норма:\n"
+            f"<b>{daily_calories} ккал</b>\n"
+            f"🥩Б: {protein_norm} г, 🧈Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+            parse_mode="HTML",
             reply_markup=get_main_menu()
         )
         return ConversationHandler.END
@@ -149,7 +157,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Нет профиля. /start", reply_markup=None)
         return
 
-    _, name, weight, height, age, gender, activity_level, daily_calories = user
+    (_, name, weight, height, age, gender, activity_level,
+     daily_calories, protein_norm, fat_norm, carbs_norm) = user
+
     gender_str = "Мужской" if gender == "male" else "Женский"
 
     keyboard = [[InlineKeyboardButton("✏️ Редактировать", callback_data="edit_profile")]]
@@ -157,10 +167,11 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"👤 <b>Профиль</b>:\n\n"
-        f"Имя: {name}\nВес: {weight} кг\nРост: {height} см\n"
-        f"Возраст: {age}\nПол: {gender_str}\n"
-        f"Активность: {activity_level}\n"
-        f"Норма: <b>{daily_calories} ккал</b>",
+        f"<b>Имя</b>: {name}\n<b>Вес</b>: {weight} кг\n<b>Рост</b>: {height} см\n"
+        f"<b>Возраст</b>: {age}\n<b>Пол</b>: {gender_str}\n"
+        f"<b>Активность</b>: {activity_level}\n\n"
+        f"<b>🎯 Норма</b>: {daily_calories} ккал\n"
+        f"<b>🥩Б</b>: {protein_norm} г, <b>🧈Ж</b>: {fat_norm} г, <b>🍞У</b>: {carbs_norm} г",
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -271,7 +282,7 @@ async def edit_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Добавление еды ---
 async def add_meal_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Опиши, что ты съел:", reply_markup=None)
+    await update.message.reply_text("Подробно опишите, что съели. Пишите максимально подробно, указывая вес порций и ингредиенты:", reply_markup=None)
     return ADD_MEAL
 
 
@@ -287,24 +298,28 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await analyze_food_with_gpt(food_text, YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID)
 
         items = result.get("items", [])
-        total_calories = result.get("total_calories", 0)
+        totals = result.get("total", {"calories": 0, "protein": 0, "fat": 0, "carbs": 0})
 
         context.user_data['pending_meal'] = {
             'food_text': food_text,
-            'calories': total_calories,
+            'calories': totals["calories"],
+            'protein': totals["protein"],
+            'fat': totals["fat"],
+            'carbs': totals["carbs"],
             'items': items
         }
 
         product_list = "\n".join(
-            [f"• {item['product']} — {item['quantity']} — {item['calories']} ккал" for item in items]
-        ) if items else "• Не удалось распознать отдельные продукты."
+        [f"• {i['product']} — {i['quantity']} — {i['calories']} ккал, Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
+        )
 
         summary = f"""
 <b>Распознано:</b>
 
 {product_list}
 
-<b>Общее количество калорий:</b> {total_calories} ккал
+<b>🍽 Итого:</b> {totals['calories']} ккал  
+🥩Б: {totals['protein']} г, 🧈Ж: {totals['fat']} г, 🍞У: {totals['carbs']} г
 
 Выбери действие:
         """
@@ -336,13 +351,19 @@ async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("❌ Данные устарели. Попробуй снова.")
         return ConversationHandler.END
 
-    food_text = pending['food_text']
-    calories = pending['calories']
-
-    add_meal(update.effective_user.id, food_text, calories)
+    add_meal(
+        update.effective_user.id,
+        pending['food_text'],
+        pending['calories'],
+        pending['protein'],
+        pending['fat'],
+        pending['carbs']
+    )
 
     await query.message.reply_text(
-        f"✅ Приём пищи сохранён!\nДобавлено: <b>{calories} ккал</b>",
+        f"✅ Приём пищи сохранён!\n"
+        f"🍽 Добавлено: {pending['calories']} ккал\n"
+        f"🥩Б: {pending['protein']} г, 🧈Ж: {pending['fat']} г, 🍞У: {pending['carbs']} г",
         parse_mode="HTML",
         reply_markup=get_main_menu()
     )
@@ -352,7 +373,7 @@ async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def retry_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("Опиши, что ты съел:")
+    await query.message.reply_text("Подробно опишите, что съели. Пишите максимально подробно, указывая вес порций и ингредиенты:")
     return ADD_MEAL
 
 
@@ -365,7 +386,10 @@ async def cancel_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = get_user(user_id)
-    daily_norm = user[7] if user else 0
+    daily_norm = user["daily_calories"]
+    protein_norm = user["protein_norm"]
+    fat_norm = user["fat_norm"]
+    carbs_norm = user["carbs_norm"]
     stats_data = get_stats(user_id)
 
     keyboard = [[InlineKeyboardButton("📅 Меню за 7 дней", callback_data="last_7_days")]]
@@ -373,9 +397,12 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"📊 <b>Статистика</b>:\n\n"
-        f"Сегодня: {stats_data['day']} / {daily_norm} ккал\n"
-        f"Неделя: {stats_data['week']} ккал\n"
-        f"Месяц: {stats_data['month']} ккал",
+        f"-----------------------------------------------\n"
+        f"<b>Сегодня</b>: {stats_data['day']['calories']} / {daily_norm} ккал\n\n"
+        f"🥩Б: {stats_data['day']['protein']} / {protein_norm} г\n 🧈Ж: {stats_data['day']['fat']} / {fat_norm} г,\n🍞У: {stats_data['day']['carbs']} / {carbs_norm} г\n"
+        f"-----------------------------------------------\n\n"
+        f"<b>За последнюю неделю</b>: {stats_data['week']['calories']} ккал (Б: {stats_data['week']['protein']} г, Ж: {stats_data['week']['fat']} г, У: {stats_data['week']['carbs']} г)\n"
+        f"<b>За последний месяц</b>: {stats_data['month']['calories']} ккал (Б: {stats_data['month']['protein']} г, Ж: {stats_data['month']['fat']} г, У: {stats_data['month']['carbs']} г)",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
