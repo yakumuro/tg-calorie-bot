@@ -37,6 +37,8 @@ from bot.handlers import (
     set_rate_gain_medium_handler,
     set_rate_gain_fast_handler,
     handle_all_text_input,
+    show_weekly_chart,
+    show_monthly_chart,
 )
 
 # Логирование
@@ -99,6 +101,10 @@ def main():
     app.add_handler(set_rate_gain_slow_handler)
     app.add_handler(set_rate_gain_medium_handler)
     app.add_handler(set_rate_gain_fast_handler)
+
+    # Обработчики графиков
+    app.add_handler(CallbackQueryHandler(show_weekly_chart, pattern="chart_week"))
+    app.add_handler(CallbackQueryHandler(show_monthly_chart, pattern="chart_month"))
     
     # Обработчики текстовых сообщений
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_text_input))

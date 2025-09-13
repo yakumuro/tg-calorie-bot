@@ -211,3 +211,29 @@ def delete_meals_for_day(user_id: int) -> bool:
     conn.commit()
     conn.close()
     return deleted_count > 0
+
+def get_meals_last_30_days(user_id: int):
+    """Получает приёмы пищи за последние 30 дней"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT food_text, calories, protein, fat, carbs, timestamp
+        FROM meals 
+        WHERE user_id = ? AND date(timestamp) >= date('now', '-30 days')
+        ORDER BY timestamp DESC
+    """, (user_id,))
+    
+    meals = []
+    for row in cursor.fetchall():
+        meals.append({
+            'food_text': row[0],
+            'calories': row[1],
+            'protein': row[2],
+            'fat': row[3],
+            'carbs': row[4],
+            'timestamp': row[5]
+        })
+    
+    conn.close()
+    return meals

@@ -11,6 +11,7 @@ from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
 import logging
 from datetime import datetime, date
 from collections import defaultdict
+from bot.charts import create_weekly_chart, create_monthly_chart
 
 logger = logging.getLogger(__name__)
 
@@ -206,13 +207,13 @@ async def edit_profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
     keyboard = [
-        [InlineKeyboardButton("👤 Имя", callback_data="edit_name")],
-        [InlineKeyboardButton("⚖️ Вес", callback_data="edit_weight")],
-        [InlineKeyboardButton("📏 Рост", callback_data="edit_height")],
-        [InlineKeyboardButton("🎂 Возраст", callback_data="edit_age")],
-        [InlineKeyboardButton("🚻 Пол", callback_data="edit_gender")],
-        [InlineKeyboardButton("🏃 Активность", callback_data="edit_activity")],
-        [InlineKeyboardButton("🎯 Цель", callback_data="edit_goal")]
+        [InlineKeyboardButton("👤 Имя", callback_data="edit_name"),
+        InlineKeyboardButton("⚖️ Вес", callback_data="edit_weight")],
+        [InlineKeyboardButton("📏 Рост", callback_data="edit_height"),
+        InlineKeyboardButton("🎂 Возраст", callback_data="edit_age")],
+        [InlineKeyboardButton("🚻 Пол", callback_data="edit_gender"),
+        InlineKeyboardButton("🏃 Активность", callback_data="edit_activity")],
+        [InlineKeyboardButton("�� Цель", callback_data="edit_goal")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -923,17 +924,14 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Нет профиля. /start", reply_markup=None)
         return
 
-    # Получаем норму из профиля
     daily_norm = user["daily_calories"] or 0
     protein_norm = user["protein_norm"] or 0
     fat_norm = user["fat_norm"] or 0
     carbs_norm = user["carbs_norm"] or 0
 
     stats_data = get_stats(user_id)
-
     progress_today = render_progress_bar(stats_data['day']['calories'], daily_norm)
 
-    # Если статистика ещё пустая, подставляем 0
     day_stats = stats_data.get('day', {})
     week_stats = stats_data.get('week', {})
     month_stats = stats_data.get('month', {})
@@ -953,24 +951,29 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     month_fat = month_stats.get('fat') or 0
     month_carbs = month_stats.get('carbs') or 0
 
+    # Добавляем кнопки для графиков
+
     keyboard = [
-    [InlineKeyboardButton("📅 Меню за 7 дней", callback_data="last_7_days")],
-    [InlineKeyboardButton("🗑 Удалить данные за сегодня", callback_data="clear_today")]
-]
+        [InlineKeyboardButton("📅 Меню за 7 дней", callback_data="last_7_days"),
+        InlineKeyboardButton("📊 График за неделю", callback_data="chart_week")],
+        [InlineKeyboardButton("📊 График за месяц", callback_data="chart_month"),
+        InlineKeyboardButton("🗑 Удалить данные за сегодня", callback_data="clear_today")]
+    ]
+
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
         f"📊 <b>Статистика</b>:\n\n"
         f"<b>Сегодня</b>:\n\n"
         f"Каллорий: {progress_today}\n\n"
-        f"🥩Белков: {day_protein} / {protein_norm} г\n"
+        f"��Белков: {day_protein} / {protein_norm} г\n"
         f"🥑Жиров: {day_fat} / {fat_norm} г\n"
         f"🍞Углеводов: {day_carbs} / {carbs_norm} г\n\n"
         f"<b>📅Неделя</b>: {week_calories} ккал (Б: {week_protein} г, Ж: {week_fat} г, У: {week_carbs} г)\n"
         f"<b>📅Месяц</b>: {month_calories} ккал (Б: {month_protein} г, Ж: {month_fat} г, У: {month_carbs} г)",
         parse_mode="HTML",
         reply_markup=reply_markup
-)
+    )
 
 async def show_last_7_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1019,6 +1022,57 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Пожалуйста, выберите действие через кнопки ниже, прежде чем отправлять текст."
     )
+
+
+# Графики для статистики 
+
+async def show_weekly_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    
+    try:
+        # Создаем график
+        img_buffer = await create_weekly_chart(user_id)
+        
+        # Отправляем как фото
+        await query.message.reply_photo(
+            photo=img_buffer,
+            caption="�� График калорий за неделю",
+            reply_markup=get_main_menu()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания графика недели: {e}")
+        await query.message.reply_text(
+            "❌ Ошибка создания графика. Попробуйте позже.",
+            reply_markup=get_main_menu()
+        )
+
+async def show_monthly_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    
+    try:
+        # Создаем график
+        img_buffer = await create_monthly_chart(user_id)
+        
+        # Отправляем как фото
+        await query.message.reply_photo(
+            photo=img_buffer,
+            caption="📊 График калорий за месяц",
+            reply_markup=get_main_menu()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания графика месяца: {e}")
+        await query.message.reply_text(
+            "❌ Ошибка создания графика. Попробуйте позже.",
+            reply_markup=get_main_menu()
+        )
 
 async def goal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
