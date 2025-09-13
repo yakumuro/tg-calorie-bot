@@ -12,7 +12,8 @@ from bot.handlers import (
     retry_handler,
     last_7_days_handler,
     clear_today_handler,
-    fallback_handler
+    fallback_handler,
+    # edit_goal_conv
 )
 
 # Логирование
@@ -47,6 +48,7 @@ def main():
     app.add_handler(retry_handler)         # повтор ввода еды
     app.add_handler(last_7_days_handler)   # просмотр меню за 7 дней
     app.add_handler(clear_today_handler)   # удаление пищи за текущий день
+    # app.add_handler(edit_goal_conv) # редактирвоание целей
 
     # Обработчик ошибок
     app.add_error_handler(error_handler)

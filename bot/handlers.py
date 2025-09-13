@@ -21,6 +21,8 @@ NAME, WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY, GOAL, TARGET_WEIGHT, GOAL_RATE = ra
 # Редактирование профиля
 EDIT_NAME, EDIT_WEIGHT, EDIT_HEIGHT, EDIT_AGE, EDIT_GENDER, EDIT_ACTIVITY = range(9, 15)
 
+EDIT_GOAL, EDIT_TARGET_WEIGHT, EDIT_GOAL_RATE = range(17, 20)
+
 # Добавление еды
 ADD_MEAL, AWAIT_CONFIRM = range(15, 17)
 
@@ -203,11 +205,12 @@ async def edit_profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     keyboard = [
         [InlineKeyboardButton("👤 Имя", callback_data="edit_field_name"),
-         InlineKeyboardButton("⚖️ Вес", callback_data="edit_field_weight")],
+        InlineKeyboardButton("⚖️ Вес", callback_data="edit_field_weight")],
         [InlineKeyboardButton("📏 Рост", callback_data="edit_field_height"),
-         InlineKeyboardButton("🎂 Возраст", callback_data="edit_field_age")],
+        InlineKeyboardButton("🎂 Возраст", callback_data="edit_field_age")],
         [InlineKeyboardButton("🚻 Пол", callback_data="edit_field_gender"),
-         InlineKeyboardButton("🏃 Активность", callback_data="edit_field_activity")]
+        InlineKeyboardButton("🏃 Активность", callback_data="edit_field_activity")],
+        [InlineKeyboardButton("🎯 Цель", callback_data="edit_goal")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -388,6 +391,140 @@ async def edit_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_main_menu()
     )
     return ConversationHandler.END
+
+async def edit_goal_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = [
+        [InlineKeyboardButton("Похудеть", callback_data="edit_goal_lose")],
+        [InlineKeyboardButton("Набрать", callback_data="edit_goal_gain")],
+        [InlineKeyboardButton("Поддерживать", callback_data="edit_goal_maintain")]
+    ]
+    await query.message.edit_text("Выбери новую цель:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return EDIT_GOAL
+
+async def edit_goal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    goal = query.data.replace("edit_goal_", "")
+    context.user_data['edit_goal'] = goal
+
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    if not user:
+        await query.message.edit_text("Ошибка: профиль не найден.", reply_markup=get_main_menu())
+        return ConversationHandler.END
+
+    if goal == "maintain":
+        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == user["activity_level"]][0]
+        daily_calories = calculate_daily_calories(user["weight"], user["height"], user["age"], user["gender"], activity_code)
+        protein_norm, fat_norm, carbs_norm = calculate_macros(user["weight"], daily_calories)
+        add_user(user_id, user["name"], user["weight"], user["height"], user["age"], user["gender"],
+                 user["activity_level"], daily_calories, goal_type='maintain', target_weight=None, goal_rate=None)
+        
+        # Используем send_message вместо edit_text для избежания ошибки
+        await query.message.delete()  # Удаляем старое сообщение
+        await query.message.chat.send_message(
+            f"✅ Цель обновлена на «Поддерживать»!\n"
+            f"🎯 Норма: {daily_calories} ккал\n"
+            f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+        return ConversationHandler.END
+
+    # Если цель похудеть или набрать → редактируем сообщение и просим ввести целевой вес
+    await query.message.edit_text("Введите целевой вес (в кг):", reply_markup=None)
+    return EDIT_TARGET_WEIGHT
+
+async def edit_target_weight_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    try:
+        target_weight = float(text)
+        if target_weight <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("Введите корректный вес числом (например, 70.0):")
+        return EDIT_TARGET_WEIGHT
+
+    goal = context.user_data.get('edit_goal')
+    current_weight = get_user(update.effective_user.id)["weight"]
+
+    if goal == "lose" and not (target_weight < current_weight):
+        await update.message.reply_text("Целевой вес должен быть меньше текущего:")
+        return EDIT_TARGET_WEIGHT
+    if goal == "gain" and not (target_weight > current_weight):
+        await update.message.reply_text("Целевой вес должен быть больше текущего:")
+        return EDIT_TARGET_WEIGHT
+
+    context.user_data['edit_target_weight'] = target_weight
+
+    # Предлагаем темп
+    if goal == "lose":
+        keyboard = [
+            [InlineKeyboardButton("Долго и легко — 0.25 кг/нед", callback_data="edit_rate_lose_slow")],
+            [InlineKeyboardButton("Сбалансированно — 0.5 кг/нед", callback_data="edit_rate_lose_medium")],
+            [InlineKeyboardButton("Быстро — 1.0 кг/нед", callback_data="edit_rate_lose_fast")]
+        ]
+    else:  # gain
+        keyboard = [
+            [InlineKeyboardButton("Медленно — 0.25 кг/нед", callback_data="edit_rate_gain_slow")],
+            [InlineKeyboardButton("Сбалансированно — 0.5 кг/нед", callback_data="edit_rate_gain_medium")],
+            [InlineKeyboardButton("Быстро — 0.75 кг/нед", callback_data="edit_rate_gain_fast")]
+        ]
+
+    await update.message.reply_text("Выбери темп достижения цели:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return EDIT_GOAL_RATE
+
+async def edit_goal_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat = query.message.chat  # сохраняем до удаления
+
+    data = query.data.split("_")
+    goal_type, rate_key = data[2], data[3]  # edit_rate_lose_medium → ['edit','rate','lose','medium']
+
+    kg_mapping = {
+        "lose": {"slow": 0.25, "medium": 0.5, "fast": 1.0},
+        "gain": {"slow": 0.25, "medium": 0.5, "fast": 0.75}
+    }
+
+    kg_per_week = kg_mapping[goal_type][rate_key]
+
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == user["activity_level"]][0]
+
+    maintenance = calculate_daily_calories(user["weight"], user["height"], user["age"], user["gender"], activity_code)
+    daily_adjustment = (kg_per_week * 7700) / 7.0
+    daily_calories = round(maintenance - daily_adjustment, 1) if goal_type == "lose" else round(maintenance + daily_adjustment, 1)
+
+    protein_norm, fat_norm, carbs_norm = calculate_macros(user["weight"], daily_calories)
+
+    # Сохраняем цель
+    add_user(user_id, user["name"], user["weight"], user["height"], user["age"], user["gender"],
+             user["activity_level"], daily_calories, goal_type=goal_type,
+             target_weight=context.user_data.get('edit_target_weight'),
+             goal_rate=f"{kg_per_week}кг/нед")
+
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+
+    await chat.send_message(
+        f"✅ Цель обновлена!\n"
+        f"🎯 {('Похудеть' if goal_type=='lose' else 'Набрать')} ({kg_per_week} кг/нед)\n"
+        f"🎯 Целевой вес: {context.user_data.get('edit_target_weight')} кг\n"
+        f"🎯 Норма с учётом цели: {daily_calories} ккал\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        parse_mode="HTML",
+        reply_markup=get_main_menu()
+    )
+    return ConversationHandler.END
+
 
 
 # --- Добавление еды ---
@@ -842,53 +979,81 @@ async def edit_field_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.warning(f"Не удалось удалить старое сообщение с меню редактирования: {e}")
 
-    if field == "name":
-        await query.message.chat.send_message("Введите новое имя:")
-        return EDIT_NAME
-    elif field == "weight":
-        await query.message.chat.send_message("Введите новый вес (кг):")
-        return EDIT_WEIGHT
-    elif field == "height":
-        await query.message.chat.send_message("Введите новый рост (см):")
-        return EDIT_HEIGHT
-    elif field == "age":
-        await query.message.chat.send_message("Введите новый возраст:")
-        return EDIT_AGE
-    elif field == "gender":
-        keyboard = [
-            [InlineKeyboardButton("Мужской", callback_data="edit_gender_male"),
-             InlineKeyboardButton("Женский", callback_data="edit_gender_female")]
-        ]
-        await query.message.chat.send_message("Выберите пол:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return EDIT_GENDER
-    elif field == "activity":
-        keyboard = [
-            [InlineKeyboardButton("Нет активности", callback_data="edit_act_none")],
-            [InlineKeyboardButton("Минимальная", callback_data="edit_act_low")],
-            [InlineKeyboardButton("Средняя", callback_data="edit_act_medium")],
-            [InlineKeyboardButton("Высокая", callback_data="edit_act_high")]
-        ]
-        await query.message.chat.send_message("Выберите уровень активности:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return EDIT_ACTIVITY
+    try:
+        if field == "name":
+            await query.message.chat.send_message("Введите новое имя:")
+            return EDIT_NAME
+        elif field == "weight":
+            await query.message.chat.send_message("Введите новый вес (кг):")
+            return EDIT_WEIGHT
+        elif field == "height":
+            await query.message.chat.send_message("Введите новый рост (см):")
+            return EDIT_HEIGHT
+        elif field == "age":
+            await query.message.chat.send_message("Введите новый возраст:")
+            return EDIT_AGE
+        elif field == "gender":
+            keyboard = [
+                [InlineKeyboardButton("Мужской", callback_data="edit_gender_male"),
+                 InlineKeyboardButton("Женский", callback_data="edit_gender_female")]
+            ]
+            await query.message.chat.send_message("Выберите пол:", reply_markup=InlineKeyboardMarkup(keyboard))
+            return EDIT_GENDER
+        elif field == "activity":
+            keyboard = [
+                [InlineKeyboardButton("Нет активности", callback_data="edit_act_none")],
+                [InlineKeyboardButton("Минимальная", callback_data="edit_act_low")],
+                [InlineKeyboardButton("Средняя", callback_data="edit_act_medium")],
+                [InlineKeyboardButton("Высокая", callback_data="edit_act_high")]
+            ]
+            await query.message.chat.send_message("Выберите уровень активности:", reply_markup=InlineKeyboardMarkup(keyboard))
+            return EDIT_ACTIVITY
+        elif field == "goal":
+            # Переходим к редактированию цели
+            keyboard = [
+                [InlineKeyboardButton("Похудеть", callback_data="edit_goal_lose")],
+                [InlineKeyboardButton("Набрать", callback_data="edit_goal_gain")],
+                [InlineKeyboardButton("Поддерживать", callback_data="edit_goal_maintain")]
+            ]
+            await query.message.chat.send_message("Выбери новую цель:", reply_markup=InlineKeyboardMarkup(keyboard))
+            return EDIT_GOAL
+    except Exception as e:
+        logger.error(f"Ошибка в edit_field_handler: {e}")
+        await query.message.chat.send_message("Произошла ошибка. Попробуйте снова.", reply_markup=get_main_menu())
+        return ConversationHandler.END
 
 
 edit_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(edit_profile_start, pattern="edit_profile")],
     states={
-        # обработка выбора поля
-        "FIELD": [CallbackQueryHandler(edit_field_handler, pattern="^edit_field_")],
-
-        # ввод новых значений
+        "FIELD": [
+            CallbackQueryHandler(edit_field_handler, pattern="^edit_field_"),
+            CallbackQueryHandler(edit_goal_start, pattern="edit_goal")  # Добавляем эту строку
+        ],
         EDIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_name)],
         EDIT_WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_weight)],
         EDIT_HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_height)],
         EDIT_AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_age)],
         EDIT_GENDER: [CallbackQueryHandler(edit_gender, pattern="^edit_gender_")],
         EDIT_ACTIVITY: [CallbackQueryHandler(edit_activity, pattern="^edit_act_")],
+        EDIT_GOAL: [CallbackQueryHandler(edit_goal_handler, pattern="^edit_goal_")],
+        EDIT_TARGET_WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_target_weight_handler)],
+        EDIT_GOAL_RATE: [CallbackQueryHandler(edit_goal_rate_handler, pattern="^edit_rate_")],
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_user=True
 )
+
+# edit_goal_conv = ConversationHandler(
+#     entry_points=[CallbackQueryHandler(edit_goal_start, pattern="edit_goal")],
+#     states={
+#         EDIT_GOAL: [CallbackQueryHandler(edit_goal_handler, pattern="^edit_goal_")],
+#         EDIT_TARGET_WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_target_weight_handler)],
+#         EDIT_GOAL_RATE: [CallbackQueryHandler(edit_goal_rate_handler, pattern="^edit_rate_")]
+#     },
+#     fallbacks=[CommandHandler('cancel', cancel)],
+#     per_user=True
+# )
 
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler('start', start)],
