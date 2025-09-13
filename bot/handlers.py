@@ -966,7 +966,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 <b>Статистика</b>:\n\n"
         f"<b>Сегодня</b>:\n\n"
         f"Каллорий: {progress_today}\n\n"
-        f"��Белков: {day_protein} / {protein_norm} г\n"
+        f"🥩Белков: {day_protein} / {protein_norm} г\n"
         f"🥑Жиров: {day_fat} / {fat_norm} г\n"
         f"🍞Углеводов: {day_carbs} / {carbs_norm} г\n\n"
         f"<b>📅Неделя</b>: {week_calories} ккал (Б: {week_protein} г, Ж: {week_fat} г, У: {week_carbs} г)\n"
