@@ -1,7 +1,11 @@
 import sqlite3
 import os
 from config.config import DATABASE_PATH
-from datetime import datetime, timedelta 
+from datetime import datetime, timedelta
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def init_db():
     try:
@@ -267,20 +271,29 @@ def update_goal_start_date(user_id: int, start_date: datetime):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Добавляем колонку если её нет
     try:
-        cursor.execute("ALTER TABLE users ADD COLUMN goal_start_date TEXT")
-    except:
-        pass  # Колонка уже существует
-    
-    cursor.execute("""
-        UPDATE users 
-        SET goal_start_date = ? 
-        WHERE user_id = ?
-    """, (start_date.isoformat(), user_id))
-    
-    conn.commit()
-    conn.close()
+        # Проверяем существование колонки
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        if 'goal_start_date' not in columns:
+            logger.info(f"Adding goal_start_date column for user {user_id}")
+            cursor.execute("ALTER TABLE users ADD COLUMN goal_start_date TEXT")
+        
+        cursor.execute("""
+            UPDATE users 
+            SET goal_start_date = ? 
+            WHERE user_id = ?
+        """, (start_date.isoformat(), user_id))
+        
+        conn.commit()
+        logger.info(f"Goal start date updated for user {user_id}: {start_date.isoformat()}")
+        
+    except Exception as e:
+        logger.error(f"Error updating goal start date for user {user_id}: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 def get_goal_start_date(user_id: int):
     """Получает дату начала цели"""
@@ -288,13 +301,27 @@ def get_goal_start_date(user_id: int):
     cursor = conn.cursor()
     
     try:
+        # Проверяем существование колонки
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        if 'goal_start_date' not in columns:
+            logger.warning(f"goal_start_date column doesn't exist for user {user_id}")
+            return None
+            
         cursor.execute("SELECT goal_start_date FROM users WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
-        conn.close()
         
         if row and row[0]:
-            return datetime.fromisoformat(row[0])
+            start_date = datetime.fromisoformat(row[0])
+            logger.info(f"Retrieved goal start date for user {user_id}: {start_date}")
+            return start_date
+        else:
+            logger.warning(f"No goal start date found for user {user_id}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error getting goal start date for user {user_id}: {e}")
         return None
-    except:
+    finally:
         conn.close()
-        return None

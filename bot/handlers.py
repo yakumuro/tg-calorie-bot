@@ -749,6 +749,10 @@ async def set_goal_with_rate(update: Update, context: ContextTypes.DEFAULT_TYPE,
              user["activity_level"], daily_calories, goal_type=goal_type,
              target_weight=target_weight, goal_rate=f"{kg_per_week}кг/нед")
     
+    # ВАЖНОЕ ДОБАВЛЕНИЕ: обновляем дату начала цели при редактировании
+    logger.info(f"Updating goal start date for user {user_id} during profile edit")
+    update_goal_start_date(user_id, datetime.now())
+    
     try:
         await query.message.delete()
     except Exception:
@@ -979,7 +983,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📅 Меню за 7 дней", callback_data="last_7_days"),
          InlineKeyboardButton("📊 График за неделю", callback_data="chart_week")],
         [InlineKeyboardButton("📊 График за месяц", callback_data="chart_month"),
-         InlineKeyboardButton("🗑 Удалить данные за сегодня", callback_data="clear_today")]
+         InlineKeyboardButton("🗑 Очистить еду за сегодня", callback_data="clear_today")]
     ]
     
     # Добавляем кнопки для целей если они есть
@@ -1297,7 +1301,7 @@ async def goal_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data  # e.g. rate_lose_medium
     parts = data.split("_")
-    # parts[1] == 'lose'|'gain', parts[2] == 'slow'|'medium'|'fast'
+    
     if len(parts) < 3:
         await query.message.reply_text("Неверный выбор. Повтори ещё раз.", reply_markup=get_main_menu())
         return ConversationHandler.END
@@ -1345,7 +1349,7 @@ async def goal_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Факторы для БЖУ в зависимости от цели (упрощённо)
     if goal_type == "lose":
-        protein_factor = 2.0  # чуть больше белка при дефиците
+        protein_factor = 2.0
         fat_factor = 1.0
     elif goal_type == "gain":
         protein_factor = 1.6
@@ -1361,8 +1365,8 @@ async def goal_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(user_id, name, weight, height, age, gender, activity_label, daily_calories,
              goal_type=goal_type, target_weight=target_weight, goal_rate=f"{kg_per_week}кг/нед")
 
-    # Устанавливаем дату начала цели
-    from datetime import datetime
+    # Устанавливаем дату начала цели - ВАЖНОЕ ИЗМЕНЕНИЕ!
+    logger.info(f"Setting goal start date for user {user_id}")
     update_goal_start_date(user_id, datetime.now())
 
     # Создаем график цели
@@ -1471,3 +1475,16 @@ retry_handler = CallbackQueryHandler(retry_meal, pattern="^retry_meal$")
 last_7_days_handler = CallbackQueryHandler(show_last_7_days, pattern="^last_7_days$")
 goal_callback_handler = CallbackQueryHandler(goal_handler, pattern="^goal_")
 goal_rate_callback_handler = CallbackQueryHandler(goal_rate_handler, pattern="^rate_")
+
+async def debug_goal_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда для отладки даты начала цели"""
+    user_id = update.effective_user.id
+    goal_info = get_user_goal_info(user_id)
+    start_date = get_goal_start_date(user_id)
+    
+    debug_text = f"User ID: {user_id}\n"
+    debug_text += f"Goal info: {goal_info}\n"
+    debug_text += f"Start date: {start_date}\n"
+    
+    if goal_info and start_date:
+        days_passed = (datetime.now().date() - start_date)
