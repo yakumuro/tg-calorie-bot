@@ -9,6 +9,7 @@ def init_db():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
+        # Создаём таблицу с новыми полями (если ещё нет)
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -21,9 +22,12 @@ def init_db():
             daily_calories REAL NOT NULL,
             protein_norm REAL DEFAULT 0,
             fat_norm REAL DEFAULT 0,
-            carbs_norm REAL DEFAULT 0
+            carbs_norm REAL DEFAULT 0,
+            goal_type TEXT DEFAULT 'maintain',
+            target_weight REAL,
+            goal_rate TEXT
         )
-    ''')
+        ''')
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS meals (
@@ -40,6 +44,17 @@ def init_db():
         ''')
 
         conn.commit()
+
+        # Миграция: если таблица users была старой — добавим колонки (без потери данных)
+        existing = [r["name"] for r in cursor.execute("PRAGMA table_info(users)").fetchall()]
+        if 'goal_type' not in existing:
+            cursor.execute("ALTER TABLE users ADD COLUMN goal_type TEXT DEFAULT 'maintain'")
+        if 'target_weight' not in existing:
+            cursor.execute("ALTER TABLE users ADD COLUMN target_weight REAL")
+        if 'goal_rate' not in existing:
+            cursor.execute("ALTER TABLE users ADD COLUMN goal_rate TEXT")
+        conn.commit()
+
         conn.close()
         print("База данных инициализирована")
     except Exception as e:
@@ -52,9 +67,10 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-def calculate_macros(weight: float, daily_calories: float) -> tuple[float, float, float]:
-    protein_g = weight * 1.8
-    fat_g = weight * 1.0
+# --- Макросы: добавлены параметры факторности (по умолчанию старые значения) ---
+def calculate_macros(weight: float, daily_calories: float, protein_factor: float = 1.8, fat_factor: float = 1.0):
+    protein_g = weight * protein_factor
+    fat_g = weight * fat_factor
     protein_cal = protein_g * 4
     fat_cal = fat_g * 9
     carbs_cal = daily_calories - (protein_cal + fat_cal)
@@ -62,25 +78,50 @@ def calculate_macros(weight: float, daily_calories: float) -> tuple[float, float
     return round(protein_g), round(fat_g), round(carbs_g)
 
 
-def add_user(user_id, name, weight, height, age, gender, activity_level, daily_calories):
+def add_user(user_id, name, weight, height, age, gender, activity_level, daily_calories,
+             goal_type=None, target_weight=None, goal_rate=None):
+    """
+    Сохраняет или обновляет пользователя.
+    goal_type/target_weight/goal_rate опциональны: если None — берутся из существующей записи (чтобы не затирать при правках).
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Получаем существующего user, если есть — чтобы сохранить goal-поля, если не передали
+    existing = cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+
+    if existing:
+        if goal_type is None:
+            goal_type = existing["goal_type"]
+        if target_weight is None:
+            target_weight = existing["target_weight"]
+        if goal_rate is None:
+            goal_rate = existing["goal_rate"]
+    else:
+        if goal_type is None:
+            goal_type = 'maintain'
+
     protein_norm, fat_norm, carbs_norm = calculate_macros(weight, daily_calories)
 
-    conn = get_db_connection()
-    conn.execute('''
+    cursor.execute('''
         INSERT OR REPLACE INTO users 
-        (user_id, name, weight, height, age, gender, activity_level, daily_calories, protein_norm, fat_norm, carbs_norm)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, name, weight, height, age, gender, activity_level, daily_calories, protein_norm, fat_norm, carbs_norm, goal_type, target_weight, goal_rate)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (user_id, name, weight, height, age, gender, activity_level,
-          daily_calories, protein_norm, fat_norm, carbs_norm))
+          daily_calories, protein_norm, fat_norm, carbs_norm, goal_type, target_weight, goal_rate))
     conn.commit()
     conn.close()
 
 
 def get_user(user_id):
     conn = get_db_connection()
-    user = conn.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)).fetchone()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
     conn.close()
-    return user
+    if row:
+        return dict(row)
+    return None
 
 
 def add_meal(user_id, food_text, calories, protein=0, fat=0, carbs=0):
@@ -93,48 +134,55 @@ def add_meal(user_id, food_text, calories, protein=0, fat=0, carbs=0):
     conn.close()
 
 
+# --- Безопасная конвертация row -> dict с числами, заменяем None на 0 ---
 def _row_to_safe_dict(row):
-    """Конвертирует sqlite row в словарь с безопасными числами"""
     if not row:
         return {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
-    return {k: row[k] if row[k] is not None else 0 for k in ["calories", "protein", "fat", "carbs"]}
+    return {
+        "calories": row["calories"] if row["calories"] is not None else 0,
+        "protein": row["protein"] if row["protein"] is not None else 0,
+        "fat": row["fat"] if row["fat"] is not None else 0,
+        "carbs": row["carbs"] if row["carbs"] is not None else 0
+    }
+
 
 def get_stats(user_id):
     conn = get_db_connection()
-    
     row = conn.execute("""
-        SELECT SUM(calories) as calories,
-               SUM(protein) as protein,
-               SUM(fat) as fat,
-               SUM(carbs) as carbs
-        FROM meals
+        SELECT 
+            SUM(calories) as calories,
+            SUM(protein) as protein,
+            SUM(fat) as fat,
+            SUM(carbs) as carbs
+        FROM meals 
         WHERE user_id = ? AND date(timestamp) = date('now')
     """, (user_id,)).fetchone()
     day = _row_to_safe_dict(row)
-    
+
     row = conn.execute("""
-        SELECT SUM(calories) as calories,
-               SUM(protein) as protein,
-               SUM(fat) as fat,
-               SUM(carbs) as carbs
-        FROM meals
+        SELECT 
+            SUM(calories) as calories,
+            SUM(protein) as protein,
+            SUM(fat) as fat,
+            SUM(carbs) as carbs
+        FROM meals 
         WHERE user_id = ? AND date(timestamp) >= date('now', '-6 days')
     """, (user_id,)).fetchone()
     week = _row_to_safe_dict(row)
-    
+
     row = conn.execute("""
-        SELECT SUM(calories) as calories,
-               SUM(protein) as protein,
-               SUM(fat) as fat,
-               SUM(carbs) as carbs
-        FROM meals
+        SELECT 
+            SUM(calories) as calories,
+            SUM(protein) as protein,
+            SUM(fat) as fat,
+            SUM(carbs) as carbs
+        FROM meals 
         WHERE user_id = ? AND date(timestamp) >= date('now', '-29 days')
     """, (user_id,)).fetchone()
     month = _row_to_safe_dict(row)
-    
+
     conn.close()
     return {"day": day, "week": week, "month": month}
-
 
 
 def get_meals_last_7_days(user_id):
@@ -149,6 +197,7 @@ def get_meals_last_7_days(user_id):
     """, (user_id,)).fetchall()
     conn.close()
     return meals
+
 
 def delete_meals_for_day(user_id: int) -> bool:
     conn = get_db_connection()

@@ -15,9 +15,14 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 # --- Состояния ---
-NAME, WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY = range(6)
-EDIT_NAME, EDIT_WEIGHT, EDIT_HEIGHT, EDIT_AGE, EDIT_GENDER, EDIT_ACTIVITY = range(6, 12)
-ADD_MEAL, AWAIT_CONFIRM = range(12, 14)
+# Регистрация
+NAME, WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY, GOAL, TARGET_WEIGHT, GOAL_RATE = range(9)
+
+# Редактирование профиля
+EDIT_NAME, EDIT_WEIGHT, EDIT_HEIGHT, EDIT_AGE, EDIT_GENDER, EDIT_ACTIVITY = range(9, 15)
+
+# Добавление еды
+ADD_MEAL, AWAIT_CONFIRM = range(15, 17)
 
 ACTIVITY_LABELS = {
     'none': 'Нет активности',
@@ -126,37 +131,19 @@ async def gender_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def activity_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    activity_code = query.data
-    context.user_data['activity_level'] = activity_code
+    activity_code = query.data  # 'none', 'low', 'medium', 'high'
+    context.user_data['activity_code'] = activity_code  # код для вычислений
+    context.user_data['activity_level'] = ACTIVITY_LABELS[activity_code]  # метка для профиля
 
-    user_id = update.effective_user.id
-    name = context.user_data['name']
-    weight = context.user_data['weight']
-    height = context.user_data['height']
-    age = context.user_data['age']
-    gender = context.user_data['gender']
-
-    try:
-        daily_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
-        activity_label = ACTIVITY_LABELS[activity_code]
-
-        protein_norm, fat_norm, carbs_norm = calculate_macros(weight, daily_calories)
-
-        add_user(user_id, name, weight, height, age, gender, activity_label, daily_calories)
-
-        await query.message.reply_text(
-            f"✅ Готово!\n\n"
-            f"🎯 Твоя ежедневная норма:\n"
-            f"<b>{daily_calories} ккал</b>\n"
-            f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
-            parse_mode="HTML",
-            reply_markup=get_main_menu()
-        )
-        return ConversationHandler.END
-    except Exception as e:
-        logger.error(e)
-        await query.message.reply_text("Ошибка. Попробуй /start заново.")
-        return ConversationHandler.END
+    # Запрашиваем цель (похудеть / набрать / поддерживать)
+    keyboard = [
+        [InlineKeyboardButton("Похудеть", callback_data='goal_lose'),
+         InlineKeyboardButton("Набрать", callback_data='goal_gain')],
+        [InlineKeyboardButton("Поддерживать", callback_data='goal_maintain')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text("Выбери цель:", reply_markup=reply_markup)
+    return GOAL
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -172,19 +159,36 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Нет профиля. /start", reply_markup=None)
         return
 
-    (_, name, weight, height, age, gender, activity_level,
-     daily_calories, protein_norm, fat_norm, carbs_norm) = user
+    name = user["name"]
+    weight = user["weight"]
+    height = user["height"]
+    age = user["age"]
+    gender = user["gender"]
+    activity_level = user["activity_level"]
+    daily_calories = user["daily_calories"] or 0
+    protein_norm = user["protein_norm"] or 0
+    fat_norm = user["fat_norm"] or 0
+    carbs_norm = user["carbs_norm"] or 0
+    goal_type = user.get("goal_type", "maintain")
+    target_weight = user.get("target_weight")
+    goal_rate = user.get("goal_rate")
 
     gender_str = "Мужской" if gender == "male" else "Женский"
 
     keyboard = [[InlineKeyboardButton("✏️ Редактировать", callback_data="edit_profile")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    extra = ""
+    if goal_type and goal_type != "maintain":
+        extra = f"\n<b>Цель</b>: {'Похудеть' if goal_type=='lose' else 'Набрать'}\n"
+        extra += f"<b>Целевой вес</b>: {target_weight} кг\n<b>Темп</b>: {goal_rate}\n\n"
+
     await update.message.reply_text(
         f"👤 <b>Профиль</b>:\n\n"
         f"<b>Имя</b>: {name}\n<b>Вес</b>: {weight} кг\n<b>Рост</b>: {height} см\n"
         f"<b>Возраст</b>: {age}\n<b>Пол</b>: {gender_str}\n"
         f"<b>Активность</b>: {activity_level}\n\n"
+        f"{extra}"
         f"<b>🎯 Норма</b>: {daily_calories} ккал\n"
         f"<b>🥩Б</b>: {protein_norm} г, <b>🥑Ж</b>: {fat_norm} г, <b>🍞У</b>: {carbs_norm} г",
         reply_markup=reply_markup,
@@ -221,12 +225,10 @@ async def edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ошибка: профиль не найден.")
         return ConversationHandler.END
 
-    (_, _, weight, height, age, gender, activity_level,
-     daily_calories, protein_norm, fat_norm, carbs_norm) = user
+    add_user(user_id, new_name, user["weight"], user["height"], user["age"], user["gender"], user["activity_level"], user["daily_calories"],
+             goal_type=user.get("goal_type"), target_weight=user.get("target_weight"), goal_rate=user.get("goal_rate"))
 
-    add_user(user_id, new_name, weight, height, age, gender, activity_level, daily_calories)
-
-    await update.message.reply_text("✅Имя обновлено!", reply_markup=get_main_menu())
+    await update.message.reply_text("✅ Имя обновлено!", reply_markup=get_main_menu())
     return ConversationHandler.END
 
 
@@ -241,15 +243,13 @@ async def edit_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Ошибка: профиль не найден.")
             return ConversationHandler.END
 
-        (_, name, _, height, age, gender, activity_level,
-         _, _, _, _) = user
-
         # пересчёт
-        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == activity_level][0]
-        new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
+        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == user["activity_level"]][0]
+        new_calories = calculate_daily_calories(weight, user["height"], user["age"], user["gender"], activity_code)
         protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
 
-        add_user(user_id, name, weight, height, age, gender, activity_level, new_calories)
+        add_user(user_id, user["name"], weight, user["height"], user["age"], user["gender"], user["activity_level"], new_calories,
+                 goal_type=user.get("goal_type"), target_weight=user.get("target_weight"), goal_rate=user.get("goal_rate"))
 
         await update.message.reply_text(
             f"✅ Вес обновлён!\nНовая норма: {new_calories} ккал\n"
@@ -274,14 +274,12 @@ async def edit_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Ошибка: профиль не найден.")
             return ConversationHandler.END
 
-        (_, name, weight, _, age, gender, activity_level,
-         _, _, _, _) = user
+        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == user["activity_level"]][0]
+        new_calories = calculate_daily_calories(user["weight"], height, user["age"], user["gender"], activity_code)
+        protein_norm, fat_norm, carbs_norm = calculate_macros(user["weight"], new_calories)
 
-        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == activity_level][0]
-        new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
-        protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
-
-        add_user(user_id, name, weight, height, age, gender, activity_level, new_calories)
+        add_user(user_id, user["name"], user["weight"], height, user["age"], user["gender"], user["activity_level"], new_calories,
+                 goal_type=user.get("goal_type"), target_weight=user.get("target_weight"), goal_rate=user.get("goal_rate"))
 
         await update.message.reply_text(
             f"✅ Рост обновлён!\nНовая норма: {new_calories} ккал\n"
@@ -306,14 +304,12 @@ async def edit_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Ошибка: профиль не найден.")
             return ConversationHandler.END
 
-        (_, name, weight, height, _, gender, activity_level,
-         _, _, _, _) = user
+        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == user["activity_level"]][0]
+        new_calories = calculate_daily_calories(user["weight"], user["height"], age, user["gender"], activity_code)
+        protein_norm, fat_norm, carbs_norm = calculate_macros(user["weight"], new_calories)
 
-        activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == activity_level][0]
-        new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
-        protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
-
-        add_user(user_id, name, weight, height, age, gender, activity_level, new_calories)
+        add_user(user_id, user["name"], user["weight"], user["height"], age, user["gender"], user["activity_level"], new_calories,
+                 goal_type=user.get("goal_type"), target_weight=user.get("target_weight"), goal_rate=user.get("goal_rate"))
 
         await update.message.reply_text(
             f"✅ Возраст обновлён!\nНовая норма: {new_calories} ккал\n"
@@ -338,14 +334,13 @@ async def edit_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("Ошибка: профиль не найден.")
         return ConversationHandler.END
 
-    (_, name, weight, height, age, _, activity_level,
-     _, _, _, _) = user
-
+    activity_level = user["activity_level"]
     activity_code = [k for k, v in ACTIVITY_LABELS.items() if v == activity_level][0]
-    new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
-    protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
+    new_calories = calculate_daily_calories(user["weight"], user["height"], user["age"], gender, activity_code)
+    protein_norm, fat_norm, carbs_norm = calculate_macros(user["weight"], new_calories)
 
-    add_user(user_id, name, weight, height, age, gender, activity_level, new_calories)
+    add_user(user_id, user["name"], user["weight"], user["height"], user["age"], gender, activity_level, new_calories,
+             goal_type=user.get("goal_type"), target_weight=user.get("target_weight"), goal_rate=user.get("goal_rate"))
 
     await query.message.reply_text(
         f"✅ Пол обновлён!\nНовая норма: {new_calories} ккал\n"
@@ -368,12 +363,11 @@ async def edit_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("Ошибка: профиль не найден.")
         return ConversationHandler.END
 
-    (_, name, weight, height, age, gender, _, _, _, _, _) = user
+    new_calories = calculate_daily_calories(user["weight"], user["height"], user["age"], user["gender"], activity_code)
+    protein_norm, fat_norm, carbs_norm = calculate_macros(user["weight"], new_calories)
 
-    new_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
-    protein_norm, fat_norm, carbs_norm = calculate_macros(weight, new_calories)
-
-    add_user(user_id, name, weight, height, age, gender, activity_label, new_calories)
+    add_user(user_id, user["name"], user["weight"], user["height"], user["age"], user["gender"], activity_label, new_calories,
+             goal_type=user.get("goal_type"), target_weight=user.get("target_weight"), goal_rate=user.get("goal_rate"))
 
     await query.message.reply_text(
         f"✅ Активность обновлена!\nНовая норма: {new_calories} ккал\n"
@@ -637,6 +631,171 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Пожалуйста, выберите действие через кнопки ниже, прежде чем отправлять текст."
     )
 
+async def goal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    goal = query.data.replace("goal_", "")  # 'lose' | 'gain' | 'maintain'
+    context.user_data['goal'] = goal
+
+    user_id = update.effective_user.id
+    name = context.user_data.get('name')
+    weight = context.user_data.get('weight')
+    height = context.user_data.get('height')
+    age = context.user_data.get('age')
+    gender = context.user_data.get('gender')
+    activity_code = context.user_data.get('activity_code')
+    activity_label = ACTIVITY_LABELS.get(activity_code, activity_code)
+
+    # Если цель - поддерживать — завершаем регистрацию сразу (как раньше), с вычислением нормы
+    if goal == "maintain":
+        try:
+            daily_calories = calculate_daily_calories(weight, height, age, gender, activity_code)
+            protein_norm, fat_norm, carbs_norm = calculate_macros(weight, daily_calories)
+            add_user(user_id, name, weight, height, age, gender, activity_label, daily_calories,
+                     goal_type='maintain', target_weight=None, goal_rate=None)
+
+            await query.message.reply_text(
+                f"✅ Готово!\n\n"
+                f"🎯 Твоя ежедневная норма (поддержание):\n"
+                f"<b>{daily_calories} ккал</b>\n"
+                f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+                parse_mode="HTML",
+                reply_markup=get_main_menu()
+            )
+            return ConversationHandler.END
+        except Exception as e:
+            logger.error(e)
+            await query.message.reply_text("Ошибка при расчёте. Попробуй /start заново.")
+            return ConversationHandler.END
+
+    # Если цель похудеть или набрать — запрашиваем целевой вес
+    await query.message.reply_text("Введите целевой вес (в кг, например 70.0):", reply_markup=None)
+    return TARGET_WEIGHT
+
+async def target_weight_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text
+    try:
+        target = float(text)
+        if target <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("Пожалуйста, введи корректный вес числом (например, 70.0):")
+        return TARGET_WEIGHT
+
+    # Валидация в зависимости от цели
+    goal = context.user_data.get('goal')
+    current_weight = context.user_data.get('weight')
+    if goal == "lose" and not (target < current_weight):
+        await update.message.reply_text("Целевой вес должен быть меньше текущего. Введите корректный целевой вес:")
+        return TARGET_WEIGHT
+    if goal == "gain" and not (target > current_weight):
+        await update.message.reply_text("Целевой вес должен быть больше текущего. Введите корректный целевой вес:")
+        return TARGET_WEIGHT
+
+    context.user_data['target_weight'] = target
+
+    # Предлагаем варианты скорости (с примерной кг/нед)
+    if goal == "lose":
+        keyboard = [
+            [InlineKeyboardButton("Долго и легко — 0.25 кг/нед", callback_data="rate_lose_slow")],
+            [InlineKeyboardButton("Сбалансированно — 0.5 кг/нед", callback_data="rate_lose_medium")],
+            [InlineKeyboardButton("Быстро (сложно) — 1.0 кг/нед", callback_data="rate_lose_fast")]
+        ]
+    else:  # gain
+        keyboard = [
+            [InlineKeyboardButton("Медленно — 0.25 кг/нед", callback_data="rate_gain_slow")],
+            [InlineKeyboardButton("Сбалансированно — 0.5 кг/нед", callback_data="rate_gain_medium")],
+            [InlineKeyboardButton("Быстро — 0.75 кг/нед", callback_data="rate_gain_fast")]
+        ]
+
+    await update.message.reply_text("Выбери темп достижения цели (примерная скорость):", reply_markup=InlineKeyboardMarkup(keyboard))
+    return GOAL_RATE
+
+async def goal_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data  # e.g. rate_lose_medium
+    parts = data.split("_")
+    # parts[1] == 'lose'|'gain', parts[2] == 'slow'|'medium'|'fast'
+    if len(parts) < 3:
+        await query.message.reply_text("Неверный выбор. Повтори ещё раз.", reply_markup=get_main_menu())
+        return ConversationHandler.END
+
+    goal_type = parts[1]
+    rate_key = parts[2]
+
+    # kg/week mapping
+    mapping = {
+        "lose": {"slow": 0.25, "medium": 0.5, "fast": 1.0},
+        "gain": {"slow": 0.25, "medium": 0.5, "fast": 0.75}
+    }
+    kg_per_week = mapping.get(goal_type, {}).get(rate_key, 0.5)
+    rate_label = f"{rate_key}"
+
+    # Получаем данные из контекста
+    name = context.user_data.get('name')
+    weight = context.user_data.get('weight')
+    height = context.user_data.get('height')
+    age = context.user_data.get('age')
+    gender = context.user_data.get('gender')
+    activity_code = context.user_data.get('activity_code')
+    activity_label = context.user_data.get('activity_level')
+    target_weight = context.user_data.get('target_weight')
+
+    if None in (name, weight, height, age, gender, activity_code):
+        await query.message.reply_text("Некорректные данные профиля. Заполни профиль заново /start", reply_markup=get_main_menu())
+        return ConversationHandler.END
+
+    # Рассчитываем базовое поддержание и корректируем по цели
+    maintenance = calculate_daily_calories(weight, height, age, gender, activity_code)
+    daily_adjustment = (kg_per_week * 7700) / 7.0  # 7700 ккал ~ 1 кг
+    if goal_type == "lose":
+        daily_calories = round(maintenance - daily_adjustment, 1)
+    else:  # gain
+        daily_calories = round(maintenance + daily_adjustment, 1)
+
+    # Минимум ккал (защита) — можно настроить
+    min_cal = 1200 if gender == "female" else 1500
+    if daily_calories < min_cal:
+        await query.message.reply_text(
+            f"Выбранный темп даёт слишком низкую норму ({daily_calories} ккал). Выберите более щадящий темп."
+        )
+        return GOAL_RATE
+
+    # Факторы для БЖУ в зависимости от цели (упрощённо)
+    if goal_type == "lose":
+        protein_factor = 2.0  # чуть больше белка при дефиците
+        fat_factor = 1.0
+    elif goal_type == "gain":
+        protein_factor = 1.6
+        fat_factor = 1.0
+    else:
+        protein_factor = 1.8
+        fat_factor = 1.0
+
+    protein_norm, fat_norm, carbs_norm = calculate_macros(weight, daily_calories, protein_factor=protein_factor, fat_factor=fat_factor)
+
+    # Сохраняем пользователя с новыми полями goal
+    user_id = update.effective_user.id
+    add_user(user_id, name, weight, height, age, gender, activity_label, daily_calories,
+             goal_type=goal_type, target_weight=target_weight, goal_rate=f"{kg_per_week}кг/нед")
+
+    await query.message.reply_text(
+        f"✅ Профиль создан!\n\n"
+        f"🎯 Цель: {'Похудеть' if goal_type=='lose' else 'Набрать'} ({kg_per_week} кг/нед)\n"
+        f"🎯 Целевой вес: {target_weight} кг\n\n"
+        f"🎯 Норма с учётом цели: <b>{daily_calories} ккал</b>\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        parse_mode="HTML",
+        reply_markup=get_main_menu()
+    )
+    return ConversationHandler.END
+
+
+
+
 # --- Обработчики ---
 profile_handler = MessageHandler(filters.Regex("^👤 Профиль$"), profile)
 stats_handler = MessageHandler(filters.Regex("^📊 Статистика$"), stats)
@@ -715,7 +874,10 @@ conv_handler = ConversationHandler(
         HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, height_handler)],
         AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, age_handler)],
         GENDER: [CallbackQueryHandler(gender_handler)],
-        ACTIVITY: [CallbackQueryHandler(activity_handler)]
+        ACTIVITY: [CallbackQueryHandler(activity_handler)],
+        GOAL: [CallbackQueryHandler(goal_handler, pattern="^goal_")],
+        TARGET_WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, target_weight_handler)],
+        GOAL_RATE: [CallbackQueryHandler(goal_rate_handler, pattern="^rate_")]
     },
     fallbacks=[CommandHandler('cancel', cancel)],
     per_user=True
@@ -726,3 +888,5 @@ confirm_handler = CallbackQueryHandler(confirm_meal, pattern="^confirm_meal$")
 clear_today_handler = CallbackQueryHandler(clear_today, pattern="^clear_today$")
 retry_handler = CallbackQueryHandler(retry_meal, pattern="^retry_meal$")
 last_7_days_handler = CallbackQueryHandler(show_last_7_days, pattern="^last_7_days$")
+goal_callback_handler = CallbackQueryHandler(goal_handler, pattern="^goal_")
+goal_rate_callback_handler = CallbackQueryHandler(goal_rate_handler, pattern="^rate_")
