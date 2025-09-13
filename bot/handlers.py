@@ -815,6 +815,16 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         progress_after = render_progress_bar(projected, daily_norm)
 
+        warning_text = ""
+        if daily_norm > 0 and projected > daily_norm:
+            excess = projected - daily_norm
+            warning_text = f"\n⚠️ <b>Внимание:</b> После добавления норма будет превышена на <b>{excess:.0f} ккал</b>!\n"
+
+        product_list = "\n".join(
+            [f"• {i['product']} — {i['quantity']} — {i['calories']} ккал, "
+             f"Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
+        )
+
         product_list = "\n".join(
             [f"• {i['product']} — {i['quantity']} — {i['calories']} ккал, "
              f"Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
@@ -830,6 +840,7 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 <b>📊 Норма после добавления:</b>
 {progress_after}
+{warning_text}
 
 Выбери действие:
         """
@@ -956,6 +967,11 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     month_fat = month_stats.get('fat') or 0
     month_carbs = month_stats.get('carbs') or 0
 
+    warning_text_today = ""
+    if daily_norm > 0 and day_calories > daily_norm:
+        excess_today = day_calories - daily_norm
+        warning_text_today = f"⚠️ <b>Превышение:</b> +{excess_today:.0f} ккал"
+
     # Проверяем есть ли цель
     goal_info = get_user_goal_info(user_id)
     
@@ -977,7 +993,8 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 <b>Статистика</b>:\n\n"
         f"<b>Сегодня</b>:\n\n"
         f"Каллорий: {progress_today}\n\n"
-        f"Белков: {day_protein} / {protein_norm} г\n"
+        f"{warning_text_today}\n\n"
+        f"🥩Белков: {day_protein} / {protein_norm} г\n"
         f"🥑Жиров: {day_fat} / {fat_norm} г\n"
         f"🍞Углеводов: {day_carbs} / {carbs_norm} г\n\n"
         f"<b>📅Неделя</b>: {week_calories} ккал (Б: {week_protein} г, Ж: {week_fat} г, У: {week_carbs} г)\n"
