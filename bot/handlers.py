@@ -342,7 +342,13 @@ async def edit_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(user_id, user["name"], user["weight"], user["height"], user["age"], gender, activity_level, new_calories,
              goal_type=user.get("goal_type"), target_weight=user.get("target_weight"), goal_rate=user.get("goal_rate"))
 
-    await query.message.reply_text(
+    # Удаляем старое сообщение с меню выбора пола
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение с меню пола: {e}")
+
+    await query.message.chat.send_message(
         f"✅ Пол обновлён!\nНовая норма: {new_calories} ккал\n"
         f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
         parse_mode="HTML",
@@ -369,7 +375,13 @@ async def edit_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(user_id, user["name"], user["weight"], user["height"], user["age"], user["gender"], activity_label, new_calories,
              goal_type=user.get("goal_type"), target_weight=user.get("target_weight"), goal_rate=user.get("goal_rate"))
 
-    await query.message.reply_text(
+    # Удаляем старое сообщение с меню выбора активности
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение с меню активности: {e}")
+
+    await query.message.chat.send_message(
         f"✅ Активность обновлена!\nНовая норма: {new_calories} ккал\n"
         f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
         parse_mode="HTML",
