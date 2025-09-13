@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from config.config import DATABASE_PATH
+from datetime import datetime, timedelta 
 
 def init_db():
     try:
@@ -237,3 +238,63 @@ def get_meals_last_30_days(user_id: int):
     
     conn.close()
     return meals
+
+def get_user_goal_info(user_id: int):
+    """Получает информацию о цели пользователя"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT goal_type, target_weight, goal_rate, weight
+        FROM users 
+        WHERE user_id = ?
+    """, (user_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row and row[0] != 'maintain':  # Если цель не "поддерживать"
+        return {
+            'goal_type': row[0],
+            'target_weight': row[1],
+            'goal_rate': row[2],
+            'current_weight': row[3]
+        }
+    return None
+
+def update_goal_start_date(user_id: int, start_date: datetime):
+    """Обновляет дату начала цели"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Добавляем колонку если её нет
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN goal_start_date TEXT")
+    except:
+        pass  # Колонка уже существует
+    
+    cursor.execute("""
+        UPDATE users 
+        SET goal_start_date = ? 
+        WHERE user_id = ?
+    """, (start_date.isoformat(), user_id))
+    
+    conn.commit()
+    conn.close()
+
+def get_goal_start_date(user_id: int):
+    """Получает дату начала цели"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT goal_start_date FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row and row[0]:
+            return datetime.fromisoformat(row[0])
+        return None
+    except:
+        conn.close()
+        return None

@@ -6,6 +6,7 @@ from telegram.ext import (
 from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days
 from bot.utils import calculate_daily_calories, get_main_menu, render_progress_bar
 from bot.database import calculate_macros, delete_meals_for_day
+from bot.database import get_user_goal_info, update_goal_start_date, get_goal_start_date
 from bot.yandex_gpt import analyze_food_with_gpt
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
 import logging
@@ -213,7 +214,7 @@ async def edit_profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         InlineKeyboardButton("🎂 Возраст", callback_data="edit_age")],
         [InlineKeyboardButton("🚻 Пол", callback_data="edit_gender"),
         InlineKeyboardButton("🏃 Активность", callback_data="edit_activity")],
-        [InlineKeyboardButton("�� Цель", callback_data="edit_goal")]
+        [InlineKeyboardButton("🎯 Цель", callback_data="edit_goal")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -951,14 +952,20 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     month_fat = month_stats.get('fat') or 0
     month_carbs = month_stats.get('carbs') or 0
 
-    # Добавляем кнопки для графиков
-
+    # Проверяем есть ли цель
+    goal_info = get_user_goal_info(user_id)
+    
     keyboard = [
         [InlineKeyboardButton("📅 Меню за 7 дней", callback_data="last_7_days"),
-        InlineKeyboardButton("📊 График за неделю", callback_data="chart_week")],
+         InlineKeyboardButton("📊 График за неделю", callback_data="chart_week")],
         [InlineKeyboardButton("📊 График за месяц", callback_data="chart_month"),
-        InlineKeyboardButton("🗑 Удалить данные за сегодня", callback_data="clear_today")]
+         InlineKeyboardButton("🗑 Удалить данные за сегодня", callback_data="clear_today")]
     ]
+    
+    # Добавляем кнопки для целей если они есть
+    if goal_info:
+        keyboard.append([InlineKeyboardButton("🎯 График цели", callback_data="goal_chart")])
+        keyboard.append([InlineKeyboardButton("📈 Текущий прогресс", callback_data="current_progress")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -966,7 +973,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 <b>Статистика</b>:\n\n"
         f"<b>Сегодня</b>:\n\n"
         f"Каллорий: {progress_today}\n\n"
-        f"🥩Белков: {day_protein} / {protein_norm} г\n"
+        f"Белков: {day_protein} / {protein_norm} г\n"
         f"🥑Жиров: {day_fat} / {fat_norm} г\n"
         f"🍞Углеводов: {day_carbs} / {carbs_norm} г\n\n"
         f"<b>📅Неделя</b>: {week_calories} ккал (Б: {week_protein} г, Ж: {week_fat} г, У: {week_carbs} г)\n"
@@ -1026,6 +1033,89 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Графики для статистики 
 
+async def show_goal_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    goal_info = get_user_goal_info(user_id)
+    
+    if not goal_info:
+        await query.message.reply_text("У вас нет активной цели.", reply_markup=get_main_menu())
+        return
+    
+    try:
+        from bot.charts import create_goal_progress_chart
+        from bot.database import get_goal_start_date
+        
+        start_date = get_goal_start_date(user_id)
+        img_buffer, goal_date = await create_goal_progress_chart(
+            user_id, 
+            goal_info['current_weight'], 
+            goal_info['target_weight'], 
+            goal_info['goal_type'], 
+            goal_info['goal_rate'],
+            start_date
+        )
+        
+        goal_date_str = goal_date.strftime("%d.%m.%Y")
+        
+        await query.message.reply_photo(
+            photo=img_buffer,
+            caption=f"📉 График достижения цели\n\n"
+                   f"Цель: {'Похудеть' if goal_info['goal_type']=='lose' else 'Набрать'}\n"
+                   f"Текущий вес: {goal_info['current_weight']} кг\n"
+                   f"Целевой вес: {goal_info['target_weight']} кг\n"
+                   f"Темп: {goal_info['goal_rate']}\n"
+                   f"Дата достижения: {goal_date_str}",
+            reply_markup=get_main_menu()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания графика цели: {e}")
+        await query.message.reply_text(
+            "❌ Ошибка создания графика. Попробуйте позже.",
+            reply_markup=get_main_menu()
+        )
+
+async def show_current_progress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    goal_info = get_user_goal_info(user_id)
+    
+    if not goal_info:
+        await query.message.reply_text("У вас нет активной цели.", reply_markup=get_main_menu())
+        return
+    
+    try:
+        from bot.charts import create_current_progress_chart
+        from bot.database import get_goal_start_date
+        
+        start_date = get_goal_start_date(user_id)
+        img_buffer = await create_current_progress_chart(
+            user_id, 
+            goal_info['current_weight'], 
+            goal_info['target_weight'], 
+            goal_info['goal_type'], 
+            goal_info['goal_rate'],
+            start_date
+        )
+        
+        await query.message.reply_photo(
+            photo=img_buffer,
+            caption="📈 Текущий прогресс достижения цели",
+            reply_markup=get_main_menu()
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания графика прогресса: {e}")
+        await query.message.reply_text(
+            "❌ Ошибка создания графика. Попробуйте позже.",
+            reply_markup=get_main_menu()
+        )
+
 async def show_weekly_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1039,7 +1129,7 @@ async def show_weekly_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отправляем как фото
         await query.message.reply_photo(
             photo=img_buffer,
-            caption="�� График калорий за неделю",
+            caption="📈 График калорий за неделю",
             reply_markup=get_main_menu()
         )
         
@@ -1225,15 +1315,42 @@ async def goal_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(user_id, name, weight, height, age, gender, activity_label, daily_calories,
              goal_type=goal_type, target_weight=target_weight, goal_rate=f"{kg_per_week}кг/нед")
 
-    await query.message.reply_text(
-        f"✅ Профиль создан!\n\n"
-        f"🎯 Цель: {'Похудеть' if goal_type=='lose' else 'Набрать'} ({kg_per_week} кг/нед)\n"
-        f"🎯 Целевой вес: {target_weight} кг\n\n"
-        f"🎯 Норма с учётом цели: <b>{daily_calories} ккал</b>\n"
-        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
-        parse_mode="HTML",
-        reply_markup=get_main_menu()
-    )
+    # Устанавливаем дату начала цели
+    from datetime import datetime
+    update_goal_start_date(user_id, datetime.now())
+
+    # Создаем график цели
+    try:
+        from bot.charts import create_goal_progress_chart
+        img_buffer, goal_date = await create_goal_progress_chart(
+            user_id, weight, target_weight, goal_type, f"{kg_per_week}кг/нед"
+        )
+        
+        goal_date_str = goal_date.strftime("%d.%m.%Y")
+        
+        await query.message.reply_photo(
+            photo=img_buffer,
+            caption=f"✅ Профиль создан!\n\n"
+                   f"🎯 Цель: {'Похудеть' if goal_type=='lose' else 'Набрать'} ({kg_per_week} кг/нед)\n"
+                   f"🎯 Целевой вес: {target_weight} кг\n"
+                   f"🎯 Дата достижения: {goal_date_str}\n\n"
+                   f"🎯 Норма с учётом цели: <b>{daily_calories} ккал</b>\n"
+                   f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка создания графика цели: {e}")
+        await query.message.reply_text(
+            f"✅ Профиль создан!\n\n"
+            f"🎯 Цель: {'Похудеть' if goal_type=='lose' else 'Набрать'} ({kg_per_week} кг/нед)\n"
+            f"🎯 Целевой вес: {target_weight} кг\n\n"
+            f"🎯 Норма с учётом цели: <b>{daily_calories} ккал</b>\n"
+            f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+    
     return ConversationHandler.END
 
 
