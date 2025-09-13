@@ -303,8 +303,12 @@ async def edit_goal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # Обработчик текстовых сообщений для редактирования
 async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"handle_all_text_input вызван для пользователя {update.effective_user.id}")
+    logger.info(f"editing_field: {context.user_data.get('editing_field')}")
+    logger.info(f"editing_goal: {context.user_data.get('editing_goal')}")
     # Проверяем, что пользователь в процессе редактирования
     if 'editing_field' not in context.user_data and 'editing_goal' not in context.user_data:
+        logger.info("Пользователь не в процессе редактирования, пропускаем")
         return
     
     text = update.message.text
@@ -1025,10 +1029,23 @@ async def clear_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"ℹ️ За сегодня нет добавленных приёмов пищи.", reply_markup=get_main_menu())
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Добавим логирование
+    logger.info(f"fallback_handler вызван для пользователя {update.effective_user.id}")
+    
+    # Если пользователь в процессе редактирования, не показываем fallback
+    if 'editing_field' in context.user_data or 'editing_goal' in context.user_data:
+        logger.info("Пользователь в процессе редактирования, пропускаем fallback")
+        return
+    
     # Если пользователь написал что-то не через кнопку
     await update.message.reply_text(
         "Пожалуйста, выберите действие через кнопки ниже, прежде чем отправлять текст."
     )
+
+# async def reset_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     """Сброс состояния пользователя"""
+#     context.user_data.clear()
+#     await update.message.reply_text("Состояние сброшено. Попробуйте снова.", reply_markup=get_main_menu())
 
 
 # Графики для статистики 
@@ -1077,6 +1094,18 @@ async def show_goal_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Ошибка создания графика. Попробуйте позже.",
             reply_markup=get_main_menu()
         )
+
+# async def debug_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     """Отладочная информация о состоянии пользователя"""
+#     user_id = update.effective_user.id
+#     user_data = context.user_data
+    
+#     debug_info = f"User ID: {user_id}\n"
+#     debug_info += f"User data: {user_data}\n"
+#     debug_info += f"Bot data: {context.bot_data}\n"
+    
+#     await update.message.reply_text(f"Debug info:\n{debug_info}")
+
 
 async def show_current_progress(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
