@@ -426,8 +426,8 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         stats_data = get_stats(user_id)
         daily_norm = get_user(user_id)["daily_calories"]
-        already_eaten = stats_data['day']['calories']
-        projected = already_eaten + totals['calories']
+        already_eaten = stats_data['day']['calories'] or 0
+        projected = already_eaten + totals['calories'] or 0
 
         progress_after = render_progress_bar(projected, daily_norm)
 
@@ -580,14 +580,14 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 <b>Статистика</b>:\n\n"
         f"<b>Сегодня</b>:\n\n"
         f"Каллорий: {progress_today}\n\n"
-        f"🥩Белков: {stats_data['day']['protein']} / {protein_norm} г\n"
-        f"🥑Жиров: {stats_data['day']['fat']} / {fat_norm} г\n"
-        f"🍞Углеводов: {stats_data['day']['carbs']} / {carbs_norm} г\n\n"
-        f"<b>📅Неделя</b>: {stats_data['week']['calories']} ккал (Б: {stats_data['week']['protein']} г, Ж: {stats_data['week']['fat']} г, У: {stats_data['week']['carbs']} г)\n"
-        f"<b>📅Месяц</b>: {stats_data['month']['calories']} ккал (Б: {stats_data['month']['protein']} г, Ж: {stats_data['month']['fat']} г, У: {stats_data['month']['carbs']} г)",
+        f"🥩Белков: {day_protein} / {protein_norm} г\n"
+        f"🥑Жиров: {day_fat} / {fat_norm} г\n"
+        f"🍞Углеводов: {day_carbs} / {carbs_norm} г\n\n"
+        f"<b>📅Неделя</b>: {week_calories} ккал (Б: {week_protein} г, Ж: {week_fat} г, У: {week_carbs} г)\n"
+        f"<b>📅Месяц</b>: {month_calories} ккал (Б: {month_protein} г, Ж: {month_fat} г, У: {month_carbs} г)",
         parse_mode="HTML",
         reply_markup=reply_markup
-    )
+)
 
 async def show_last_7_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query

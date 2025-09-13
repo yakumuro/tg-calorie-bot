@@ -93,44 +93,48 @@ def add_meal(user_id, food_text, calories, protein=0, fat=0, carbs=0):
     conn.close()
 
 
+def _row_to_safe_dict(row):
+    """Конвертирует sqlite row в словарь с безопасными числами"""
+    if not row:
+        return {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
+    return {k: row[k] if row[k] is not None else 0 for k in ["calories", "protein", "fat", "carbs"]}
+
 def get_stats(user_id):
     conn = get_db_connection()
+    
     row = conn.execute("""
-        SELECT 
-            SUM(calories) as calories,
-            SUM(protein) as protein,
-            SUM(fat) as fat,
-            SUM(carbs) as carbs
-        FROM meals 
+        SELECT SUM(calories) as calories,
+               SUM(protein) as protein,
+               SUM(fat) as fat,
+               SUM(carbs) as carbs
+        FROM meals
         WHERE user_id = ? AND date(timestamp) = date('now')
     """, (user_id,)).fetchone()
-
-    day = dict(row) if row else {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
-
+    day = _row_to_safe_dict(row)
+    
     row = conn.execute("""
-        SELECT 
-            SUM(calories) as calories,
-            SUM(protein) as protein,
-            SUM(fat) as fat,
-            SUM(carbs) as carbs
-        FROM meals 
+        SELECT SUM(calories) as calories,
+               SUM(protein) as protein,
+               SUM(fat) as fat,
+               SUM(carbs) as carbs
+        FROM meals
         WHERE user_id = ? AND date(timestamp) >= date('now', '-6 days')
     """, (user_id,)).fetchone()
-    week = dict(row) if row else {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
-
+    week = _row_to_safe_dict(row)
+    
     row = conn.execute("""
-        SELECT 
-            SUM(calories) as calories,
-            SUM(protein) as protein,
-            SUM(fat) as fat,
-            SUM(carbs) as carbs
-        FROM meals 
+        SELECT SUM(calories) as calories,
+               SUM(protein) as protein,
+               SUM(fat) as fat,
+               SUM(carbs) as carbs
+        FROM meals
         WHERE user_id = ? AND date(timestamp) >= date('now', '-29 days')
     """, (user_id,)).fetchone()
-    month = dict(row) if row else {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
-
+    month = _row_to_safe_dict(row)
+    
     conn.close()
     return {"day": day, "week": week, "month": month}
+
 
 
 def get_meals_last_7_days(user_id):
