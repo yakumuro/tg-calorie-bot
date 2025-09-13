@@ -428,7 +428,7 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        # Получаем текущую статистику для прогресс-бара
+        # Формируем текст с продуктами и прогрессом
         user_id = update.effective_user.id
         stats_data = get_stats(user_id)
         daily_norm = get_user(user_id)["daily_calories"]
@@ -462,17 +462,11 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.message.reply_text(summary.strip(), reply_markup=reply_markup, parse_mode="HTML")
+        # Отправляем сообщение с кнопками и сохраняем message_id
+        msg = await update.message.reply_text(summary.strip(), reply_markup=reply_markup, parse_mode="HTML")
+        context.user_data['last_meal_message_id'] = msg.message_id
+
         return AWAIT_CONFIRM
-
-    except Exception as e:
-        logger.error(f"GPT error: {e}")
-        await update.message.reply_text(
-            "❌ Не удалось распознать. Попробуй описать подробнее.",
-            reply_markup=get_main_menu()
-        )
-        return ConversationHandler.END
-
 
     except Exception as e:
         logger.error(f"GPT error: {e}")
@@ -501,7 +495,17 @@ async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending['carbs']
     )
 
-    await query.message.reply_text(
+    # Удаляем сообщение с текстом еды + кнопками
+    last_message_id = context.user_data.get('last_meal_message_id')
+    if last_message_id:
+        try:
+            await query.message.chat.delete_message(last_message_id)
+        except Exception as e:
+            logger.warning(f"Не удалось удалить старое сообщение с едой: {e}")
+        context.user_data.pop('last_meal_message_id', None)
+
+    # Отправляем подтверждение
+    await query.message.chat.send_message(
         f"✅ Приём пищи сохранён!\n"
         f"🍽 Добавлено: {pending['calories']} ккал\n"
         f"🥩Б: {pending['protein']} г, 🥑Ж: {pending['fat']} г, 🍞У: {pending['carbs']} г",
@@ -511,25 +515,26 @@ async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+
 async def retry_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # Удаляем старое сообщение с распознанной едой, если есть
+    # Удаляем старое сообщение с текстом еды + кнопками
     last_message_id = context.user_data.get('last_meal_message_id')
     if last_message_id:
         try:
             await query.message.chat.delete_message(last_message_id)
         except Exception as e:
-            logger.warning(f"Не удалось удалить старое сообщение: {e}")
+            logger.warning(f"Не удалось удалить старое сообщение с едой: {e}")
+        context.user_data.pop('last_meal_message_id', None)
 
-    # Убираем сохраненный id, чтобы не пытаться удалить снова
-    context.user_data.pop('last_meal_message_id', None)
-
-    await query.message.reply_text(
+    # Просим пользователя ввести еду заново
+    await query.message.chat.send_message(
         "Подробно опишите, что съели. Пишите максимально подробно, указывая вес порций и ингредиенты:"
     )
     return ADD_MEAL
+
 
 
 async def cancel_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
