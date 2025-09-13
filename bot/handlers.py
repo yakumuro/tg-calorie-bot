@@ -631,6 +631,11 @@ async def clear_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text(f"ℹ️ За сегодня нет добавленных приёмов пищи.", reply_markup=get_main_menu())
 
+async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Если пользователь написал что-то не через кнопку
+    await update.message.reply_text(
+        "Пожалуйста, выберите действие через кнопки ниже, прежде чем отправлять текст."
+    )
 
 # --- Обработчики ---
 profile_handler = MessageHandler(filters.Regex("^👤 Профиль$"), profile)

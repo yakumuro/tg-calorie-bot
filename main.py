@@ -1,5 +1,5 @@
 import logging
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ConversationHandler
 from config.config import TELEGRAM_TOKEN, LOG_LEVEL
 from bot.database import init_db
 from bot.handlers import (
@@ -11,7 +11,8 @@ from bot.handlers import (
     confirm_handler,
     retry_handler,
     last_7_days_handler,
-    clear_today_handler
+    clear_today_handler,
+    fallback_handler
 )
 
 # Логирование
@@ -49,6 +50,9 @@ def main():
 
     # Обработчик ошибок
     app.add_error_handler(error_handler)
+
+    # Обработчик ввода в чат без выбора кнопки меню
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_handler))
 
     logger.info("Бот запущен ✅")
     app.run_polling()
