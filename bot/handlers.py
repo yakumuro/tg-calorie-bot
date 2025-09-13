@@ -819,24 +819,30 @@ async def edit_field_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     field = query.data.replace("edit_field_", "")
     context.user_data['edit_field'] = field
 
+    # Удаляем старое сообщение с меню выбора поля
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить старое сообщение с меню редактирования: {e}")
+
     if field == "name":
-        await query.message.reply_text("Введите новое имя:")
+        await query.message.chat.send_message("Введите новое имя:")
         return EDIT_NAME
     elif field == "weight":
-        await query.message.reply_text("Введите новый вес (кг):")
+        await query.message.chat.send_message("Введите новый вес (кг):")
         return EDIT_WEIGHT
     elif field == "height":
-        await query.message.reply_text("Введите новый рост (см):")
+        await query.message.chat.send_message("Введите новый рост (см):")
         return EDIT_HEIGHT
     elif field == "age":
-        await query.message.reply_text("Введите новый возраст:")
+        await query.message.chat.send_message("Введите новый возраст:")
         return EDIT_AGE
     elif field == "gender":
         keyboard = [
             [InlineKeyboardButton("Мужской", callback_data="edit_gender_male"),
              InlineKeyboardButton("Женский", callback_data="edit_gender_female")]
         ]
-        await query.message.reply_text("Выберите пол:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.message.chat.send_message("Выберите пол:", reply_markup=InlineKeyboardMarkup(keyboard))
         return EDIT_GENDER
     elif field == "activity":
         keyboard = [
@@ -845,8 +851,9 @@ async def edit_field_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             [InlineKeyboardButton("Средняя", callback_data="edit_act_medium")],
             [InlineKeyboardButton("Высокая", callback_data="edit_act_high")]
         ]
-        await query.message.reply_text("Выберите уровень активности:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.message.chat.send_message("Выберите уровень активности:", reply_markup=InlineKeyboardMarkup(keyboard))
         return EDIT_ACTIVITY
+
 
 edit_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(edit_profile_start, pattern="edit_profile")],
