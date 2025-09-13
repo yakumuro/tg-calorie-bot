@@ -24,3 +24,12 @@ def calculate_daily_calories(weight, height, age, gender, activity_level):
         raise ValueError(f"Unknown activity level: {activity_level}")
 
     return round(bmr * factor, 1)
+
+# --- Утилита для прогресс-бара ---
+def render_progress_bar(current, total, length=20):
+    if total <= 0:
+        return "[Нет данных]"
+    ratio = min(current / total, 1)
+    filled = int(length * ratio)
+    empty = length - filled
+    return f"[{'▓' * filled}{'▒' * empty}] {current}/{total} ккал"

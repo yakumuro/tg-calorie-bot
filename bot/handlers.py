@@ -4,7 +4,7 @@ from telegram.ext import (
     ConversationHandler, ContextTypes, filters
 )
 from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days
-from bot.utils import calculate_daily_calories, get_main_menu
+from bot.utils import calculate_daily_calories, get_main_menu, render_progress_bar
 from bot.database import calculate_macros, delete_meals_for_day
 from bot.yandex_gpt import analyze_food_with_gpt
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
@@ -393,6 +393,9 @@ async def add_meal_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     food_text = update.message.text
 
+    # 🕒 Сообщение "обрабатываем"
+    processing_msg = await update.message.reply_text("⏳ Обрабатываем ваш запрос...")
+
     if not YANDEX_GPT_API_KEY or not YANDEX_GPT_FOLDER_ID:
         await update.message.reply_text("Ошибка: GPT не настроен.", reply_markup=get_main_menu())
         return ConversationHandler.END
@@ -413,8 +416,24 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'items': items
         }
 
+        # Удаляем сообщение "обрабатываем"
+        try:
+            await processing_msg.delete()
+        except Exception:
+            pass
+
+        # Получаем текущую статистику для прогресс-бара
+        user_id = update.effective_user.id
+        stats_data = get_stats(user_id)
+        daily_norm = get_user(user_id)["daily_calories"]
+        already_eaten = stats_data['day']['calories']
+        projected = already_eaten + totals['calories']
+
+        progress_after = render_progress_bar(projected, daily_norm)
+
         product_list = "\n".join(
-            [f"• {i['product']} — {i['quantity']} — {i['calories']} ккал, Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
+            [f"• {i['product']} — {i['quantity']} — {i['calories']} ккал, "
+             f"Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
         )
 
         summary = f"""
@@ -425,6 +444,9 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>🍽 Итого:</b> {totals['calories']} ккал  
 🥩Б: {totals['protein']} г, 🥑Ж: {totals['fat']} г, 🍞У: {totals['carbs']} г
 
+<b>📊 Норма после добавления:</b>
+{progress_after}
+
 Выбери действие:
         """
 
@@ -434,11 +456,17 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Сохраняем message_id для возможности удаления
-        sent_message = await update.message.reply_text(summary.strip(), reply_markup=reply_markup, parse_mode="HTML")
-        context.user_data['last_meal_message_id'] = sent_message.message_id
-
+        await update.message.reply_text(summary.strip(), reply_markup=reply_markup, parse_mode="HTML")
         return AWAIT_CONFIRM
+
+    except Exception as e:
+        logger.error(f"GPT error: {e}")
+        await update.message.reply_text(
+            "❌ Не удалось распознать. Попробуй описать подробнее.",
+            reply_markup=get_main_menu()
+        )
+        return ConversationHandler.END
+
 
     except Exception as e:
         logger.error(f"GPT error: {e}")
@@ -520,6 +548,8 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stats_data = get_stats(user_id)
 
+    progress_today = render_progress_bar(stats_data['day']['calories'], daily_norm)
+
     # Если статистика ещё пустая, подставляем 0
     day_stats = stats_data.get('day', {})
     week_stats = stats_data.get('week', {})
@@ -548,10 +578,13 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"📊 <b>Статистика</b>:\n\n"
-        f"<b>Сегодня</b>:\n\n 🍽Калорий: {day_calories} / {daily_norm} ккал\n"
-        f"🥩Белков: {day_protein} / {protein_norm} г\n🥑Жиров: {day_fat} / {fat_norm} г\n🍞Углеводов: {day_carbs} / {carbs_norm} г\n\n"
-        f"<b>📅Неделя</b>: {week_calories} ккал (Б: {week_protein} г, Ж: {week_fat} г, У: {week_carbs} г)\n"
-        f"<b>📅Месяц</b>: {month_calories} ккал (Б: {month_protein} г, Ж: {month_fat} г, У: {month_carbs} г)",
+        f"<b>Сегодня</b>:\n\n"
+        f"Каллорий: {progress_today}\n\n"
+        f"🥩Белков: {stats_data['day']['protein']} / {protein_norm} г\n"
+        f"🥑Жиров: {stats_data['day']['fat']} / {fat_norm} г\n"
+        f"🍞Углеводов: {stats_data['day']['carbs']} / {carbs_norm} г\n\n"
+        f"<b>📅Неделя</b>: {stats_data['week']['calories']} ккал (Б: {stats_data['week']['protein']} г, Ж: {stats_data['week']['fat']} г, У: {stats_data['week']['carbs']} г)\n"
+        f"<b>📅Месяц</b>: {stats_data['month']['calories']} ккал (Б: {stats_data['month']['protein']} г, Ж: {stats_data['month']['fat']} г, У: {stats_data['month']['carbs']} г)",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
