@@ -2,9 +2,7 @@ import sqlite3
 import os
 from config.config import DATABASE_PATH
 from datetime import datetime, timedelta
-import logging
-
-logger = logging.getLogger(__name__)
+from logger_config import logger
 
 
 def init_db():
@@ -30,7 +28,8 @@ def init_db():
             carbs_norm REAL DEFAULT 0,
             goal_type TEXT DEFAULT 'maintain',
             target_weight REAL,
-            goal_rate TEXT
+            goal_rate TEXT,
+            goal_start_date TEXT         
         )
         ''')
 
@@ -84,39 +83,54 @@ def calculate_macros(weight: float, daily_calories: float, protein_factor: float
 
 
 def add_user(user_id, name, weight, height, age, gender, activity_level, daily_calories,
-             goal_type=None, target_weight=None, goal_rate=None):
-    """
-    Сохраняет или обновляет пользователя.
-    goal_type/target_weight/goal_rate опциональны: если None — берутся из существующей записи (чтобы не затирать при правках).
-    """
+             goal_type=None, target_weight=None, goal_rate=None, goal_start_date=None):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Получаем существующего user, если есть — чтобы сохранить goal-поля, если не передали
     existing = cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
 
     if existing:
-        if goal_type is None:
-            goal_type = existing["goal_type"]
-        if target_weight is None:
-            target_weight = existing["target_weight"]
-        if goal_rate is None:
-            goal_rate = existing["goal_rate"]
+        # Сохраняем старые значения, если не переданы
+        goal_type = goal_type if goal_type is not None else existing["goal_type"]
+        target_weight = target_weight if target_weight is not None else existing["target_weight"]
+        goal_rate = goal_rate if goal_rate is not None else existing["goal_rate"]
+        goal_start_date = goal_start_date if goal_start_date is not None else existing["goal_start_date"]
+
+        protein_norm, fat_norm, carbs_norm = calculate_macros(weight, daily_calories)
+
+        cursor.execute('''
+            UPDATE users SET
+                name = ?,
+                weight = ?,
+                height = ?,
+                age = ?,
+                gender = ?,
+                activity_level = ?,
+                daily_calories = ?,
+                protein_norm = ?,
+                fat_norm = ?,
+                carbs_norm = ?,
+                goal_type = ?,
+                target_weight = ?,
+                goal_rate = ?,
+                goal_start_date = ?
+            WHERE user_id = ?
+        ''', (name, weight, height, age, gender, activity_level, daily_calories,
+              protein_norm, fat_norm, carbs_norm, goal_type, target_weight, goal_rate, goal_start_date, user_id))
     else:
-        if goal_type is None:
-            goal_type = 'maintain'
+        # Если нет, делаем INSERT
+        goal_type = goal_type or 'maintain'
+        protein_norm, fat_norm, carbs_norm = calculate_macros(weight, daily_calories)
+        cursor.execute('''
+            INSERT INTO users
+            (user_id, name, weight, height, age, gender, activity_level, daily_calories,
+             protein_norm, fat_norm, carbs_norm, goal_type, target_weight, goal_rate, goal_start_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, name, weight, height, age, gender, activity_level, daily_calories,
+              protein_norm, fat_norm, carbs_norm, goal_type, target_weight, goal_rate, goal_start_date))
 
-    protein_norm, fat_norm, carbs_norm = calculate_macros(weight, daily_calories)
-
-    cursor.execute('''
-        INSERT OR REPLACE INTO users 
-        (user_id, name, weight, height, age, gender, activity_level, daily_calories, protein_norm, fat_norm, carbs_norm, goal_type, target_weight, goal_rate)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (user_id, name, weight, height, age, gender, activity_level,
-          daily_calories, protein_norm, fat_norm, carbs_norm, goal_type, target_weight, goal_rate))
     conn.commit()
     conn.close()
-
 
 def get_user(user_id):
     conn = get_db_connection()

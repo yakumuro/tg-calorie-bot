@@ -1,6 +1,6 @@
-import logging
+from logger_config import logger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ConversationHandler
-from config.config import TELEGRAM_TOKEN, LOG_LEVEL
+from config.config import TELEGRAM_TOKEN
 from bot.database import init_db
 from bot.handlers import (
     conv_handler,
@@ -12,7 +12,6 @@ from bot.handlers import (
     last_7_days_handler,
     clear_today_handler,
     fallback_handler,
-    # Новые обработчики для редактирования профиля
     edit_profile_handler,
     edit_name_handler,
     edit_weight_handler,
@@ -42,16 +41,7 @@ from bot.handlers import (
     show_goal_chart,
     show_current_progress,
     voice_message_handler,
-    # reset_state,
-    # debug_state,
 )
-
-# Логирование
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=getattr(logging, LOG_LEVEL.upper(), logging.INFO)
-)
-logger = logging.getLogger(__name__)
 
 
 # Глобальный обработчик ошибок
@@ -68,7 +58,7 @@ def main():
     # Создаём приложение
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # �� Регистрация всех обработчиков (ВАЖЕН ПОРЯДОК!)
+    # Регистрация всех обработчиков (ВАЖЕН ПОРЯДОК!)
     
     # 1. Сначала ConversationHandler'ы
     app.add_handler(conv_handler)          # регистрация
@@ -125,11 +115,7 @@ def main():
     # 8. Обработчик ошибок
     app.add_error_handler(error_handler)
 
-    # 9. Команды
-    # app.add_handler(CommandHandler('reset', reset_state))
-    # app.add_handler(CommandHandler('debug', debug_state))
-
-    logger.info("Бот запущен ✅")
+    logger.info("Handlers registered, bot running...")
     app.run_polling()
 if __name__ == "__main__":
     main()
