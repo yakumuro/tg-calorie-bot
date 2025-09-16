@@ -1,7 +1,7 @@
-python-telegram-bot
-requests
-python-dotenv
-aiohttp
-matplotlib
-pytz
+python-telegram-bot==20.6
+pytz==2025.7
+python-dotenv==1.1.1
+matplotlib==3.10.6
+numpy==2.3.3
+Pillow==11.3.0
 python-telegram-bot[job-queue]
