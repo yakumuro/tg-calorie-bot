@@ -41,6 +41,7 @@ from bot.handlers import (
     show_monthly_chart,
     show_goal_chart,
     show_current_progress,
+    voice_message_handler,
     # reset_state,
     # debug_state,
 )
@@ -115,6 +116,7 @@ def main():
     app.add_handler(retry_handler)
     app.add_handler(last_7_days_handler)
     app.add_handler(clear_today_handler)
+    app.add_handler(voice_message_handler)
 
     # 7. Обработчики текста (В САМОМ КОНЦЕ!)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_text_input))

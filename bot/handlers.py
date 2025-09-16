@@ -13,8 +13,13 @@ import logging
 from datetime import datetime, date
 from collections import defaultdict
 from bot.charts import create_weekly_chart, create_monthly_chart
+from bot.yandex_speechkit import YandexSpeechToText
+import os
+
 
 logger = logging.getLogger(__name__)
+
+stt = YandexSpeechToText()
 
 # --- Состояния ---
 # Регистрация
@@ -777,10 +782,7 @@ async def add_meal_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Подробно опиши, что съел. Пиши максимально подробно, указывая вес порций и ингредиенты:", reply_markup=None)
     return ADD_MEAL
 
-
-async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    food_text = update.message.text
-
+async def process_food_text(update, context, food_text: str):
     # 🕒 Сообщение "обрабатываем"
     processing_msg = await update.message.reply_text("⏳ Обрабатываем ваш запрос...")
 
@@ -829,11 +831,6 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
              f"Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
         )
 
-        product_list = "\n".join(
-            [f"• {i['product']} — {i['quantity']} — {i['calories']} ккал, "
-             f"Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
-        )
-
         summary = f"""
 <b>Распознано:</b>
 
@@ -855,7 +852,6 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Отправляем сообщение с кнопками и сохраняем message_id
         msg = await update.message.reply_text(summary.strip(), reply_markup=reply_markup, parse_mode="HTML")
         context.user_data['last_meal_message_id'] = msg.message_id
 
@@ -868,6 +864,40 @@ async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_menu()
         )
         return ConversationHandler.END
+
+
+async def add_food_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    voice = update.message.voice
+
+    if not voice:
+        await update.message.reply_text("Не удалось получить голосовое сообщение 😔")
+        return ADD_MEAL
+
+    file = await context.bot.get_file(voice.file_id)
+    file_path = f"voice_{user.id}.ogg"
+    await file.download_to_drive(file_path)
+
+    try:
+        # 🎤 Транскрибируем
+        text = stt.recognize(file_path)
+
+        # 🔄 Используем ту же логику, что и для текста
+        return await process_food_text(update, context, text)
+
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при обработке голосового: {e}")
+        return ADD_MEAL
+
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+
+
+async def handle_food_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    food_text = update.message.text
+    return await process_food_text(update, context, food_text)
 
 
 async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1413,7 +1443,7 @@ stats_handler = MessageHandler(filters.Regex("^📊 Статистика$"), sta
 meal_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex("^📝 Добавить приём пищи$"), add_meal_start)],
     states={
-        ADD_MEAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_food_input)],
+        ADD_MEAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_food_input), MessageHandler(filters.VOICE, add_food_voice),],
         AWAIT_CONFIRM: [
             CallbackQueryHandler(confirm_meal, pattern="^confirm_meal$"),
             CallbackQueryHandler(retry_meal, pattern="^retry_meal$")
@@ -1475,6 +1505,7 @@ retry_handler = CallbackQueryHandler(retry_meal, pattern="^retry_meal$")
 last_7_days_handler = CallbackQueryHandler(show_last_7_days, pattern="^last_7_days$")
 goal_callback_handler = CallbackQueryHandler(goal_handler, pattern="^goal_")
 goal_rate_callback_handler = CallbackQueryHandler(goal_rate_handler, pattern="^rate_")
+voice_message_handler = MessageHandler(filters.VOICE, add_food_voice)
 
 async def debug_goal_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда для отладки даты начала цели"""
