@@ -1,7 +1,24 @@
+# Основной фреймворк Telegram
 python-telegram-bot==20.6
+
+# Временные зоны
 pytz==2025.7
+
+# Работа с .env
 python-dotenv==1.1.1
+
+# Графики и визуализация
 matplotlib==3.10.6
 numpy==2.3.3
 Pillow==11.3.0
-python-telegram-bot[job-queue]
+fonttools==4.59.2
+cycler==0.12.1
+kiwisolver==1.4.9
+contourpy==1.3.3
+
+# HTTP-запросы (если будут нужны)
+requests==2.32.5
+
+# Для локального времени (опционально, если решишь расширять)
+tzlocal==5.3.1
+tzdata==2025.2
