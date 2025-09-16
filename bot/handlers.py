@@ -15,6 +15,7 @@ from bot.charts import create_weekly_chart, create_monthly_chart
 from bot.yandex_speechkit import YandexSpeechToText
 import os
 from logger_config import logger
+import random
 
 stt = YandexSpeechToText()
 
@@ -36,6 +37,24 @@ ACTIVITY_LABELS = {
     'medium': 'Средняя',
     'high': 'Высокая'
 }
+
+MEAL_EXAMPLES = [
+    "200 г куриной грудки, обжаренной на оливковом масле, с 50 г киноа и 100 г брокколи",
+    "Овсяная каша на воде с 1 бананом, 10 г орехов и 1 ч.л. мёда",
+    "2 яйца всмятку, 1 ломтик цельнозернового хлеба, 50 г авокадо и 5 помидоров черри",
+    "150 г лосося на гриле, 100 г тушеной цветной капусты и 80 г сладкого картофеля",
+    "Смузи: 200 мл миндального молока, 1 яблоко, 30 г овсяных хлопьев, 10 г семян чиа",
+    "100 г творога 5%, 1 груша, 5 г грецких орехов и корица по вкусу",
+    "200 г индейки на пару, 100 г риса басмати, 80 г зеленого горошка",
+    "Салат: 50 г рукколы, 50 г шпината, 100 г помидоров, 30 г сыра фета, 1 ст.л. оливкового масла",
+    "Запечённый картофель 150 г с 100 г запеченной куриной грудки и 50 г тушёной моркови",
+    "Сэндвич: 2 ломтика цельнозернового хлеба, 50 г тунца, 20 г нежирного йогурта, листья салата",
+    "Яичница из 2 яиц, 50 г шпината и 50 г шампиньонов, обжаренных на оливковом масле",
+    "Смузи-бол: 150 мл кефира, 50 г мюсли, 1 банан, 20 г семян льна, 5 ягод клубники",
+    "150 г говяжьей вырезки, обжаренной на гриле, с 100 г киноа и 80 г брокколи",
+    "Салат из киноа: 70 г киноа, 50 г огурца, 50 г перца, 30 г нута, 1 ч.л. оливкового масла",
+    "100 г рикотты, 50 г малины, 1 ч.л. мёда и 10 г миндаля"
+]
 
 # --- Регистрация ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208,7 +227,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         extra += f"<b>Целевой вес</b>: {target_weight} кг\n<b>Темп</b>: {goal_rate}\n\n"
 
     await update.message.reply_text(
-        f"👤 <b>Профиль</b>:\n\n"
+        f"👤 <b>Ваш профиль</b>:\n\n"
         f"<b>Имя</b>: {name}\n<b>Вес</b>: {weight} кг\n<b>Рост</b>: {height} см\n"
         f"<b>Возраст</b>: {age}\n<b>Пол</b>: {gender_str}\n"
         f"<b>Активность</b>: {activity_level}\n\n"
@@ -239,7 +258,7 @@ async def edit_profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.message.edit_text("Что хочешь изменить?", reply_markup=reply_markup)
+    await query.message.edit_text("Выбери параметр профиля, который нужно изменить 👇", reply_markup=reply_markup)
     logger.debug(f"User {user_id} edit profile menu sent")
 
 # Обработчики для каждого поля
@@ -932,7 +951,11 @@ async def set_goal_with_rate(update: Update, context: ContextTypes.DEFAULT_TYPE,
 async def add_meal_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     logger.info(f"User {user_id} started adding a meal (text input)")
-    await update.message.reply_text("Подробно опиши, что съел. Пиши максимально подробно, указывая вес порций и ингредиенты:", reply_markup=None)
+
+    example_text = random.choice(MEAL_EXAMPLES)  # выбираем случайный пример
+
+    await update.message.reply_text(f"🍜 Подробно опиши, что съел. Это можно сделать текстом или в виде голосового сообщения.\n\n Например:\n\n «<i>{example_text}</i>»",parse_mode="HTML", reply_markup=None)
+
     return ADD_MEAL
 
 async def process_food_text(update, context, food_text: str):
@@ -988,7 +1011,7 @@ async def process_food_text(update, context, food_text: str):
             warning_text = f"\n⚠️ <b>Внимание:</b> После добавления норма будет превышена на <b>{excess:.0f} ккал</b>!\n"
 
         product_list = "\n".join(
-            [f"• {i['product']} — {i['quantity']} — {i['calories']} ккал, "
+            [f"🔹 {i['product']} — {i['quantity']} — {i['calories']} ккал, "
              f"Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
         )
 
@@ -997,14 +1020,14 @@ async def process_food_text(update, context, food_text: str):
 
 {product_list}
 
-<b>🍽 Итого:</b> {totals['calories']} ккал  
+<b>⚡️ Итого калорий:</b> {totals['calories']} ккал  
+
 🥩Б: {totals['protein']} г, 🥑Ж: {totals['fat']} г, 🍞У: {totals['carbs']} г
 
 <b>📊 Норма после добавления:</b>
 {progress_after}
 {warning_text}
 
-Выбери действие:
         """
 
         keyboard = [
@@ -1100,9 +1123,8 @@ async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Отправляем подтверждение
     await query.message.chat.send_message(
-        f"✅ Приём пищи сохранён!\n"
-        f"🍽 Добавлено: {pending['calories']} ккал\n"
-        f"🥩Б: {pending['protein']} г, 🥑Ж: {pending['fat']} г, 🍞У: {pending['carbs']} г",
+        f"🍜 Приём пищи сохранён!\n\n"
+        f"⚡️К: {pending['calories']}, 🥩Б: {pending['protein']} г, 🥑Ж: {pending['fat']} г, 🍞У: {pending['carbs']} г",
         parse_mode="HTML",
         reply_markup=get_main_menu()
     )
@@ -1112,6 +1134,7 @@ async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def retry_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    example_text = random.choice(MEAL_EXAMPLES)  # выбираем случайный пример
     await query.answer()
     user_id = update.effective_user.id
     logger.info(f"User {user_id} chose to retry meal input")
@@ -1126,9 +1149,7 @@ async def retry_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('last_meal_message_id', None)
 
     # Просим пользователя ввести еду заново
-    await query.message.chat.send_message(
-        "Подробно опишите, что съели. Пишите максимально подробно, указывая вес порций и ингредиенты:"
-    )
+    await query.message.chat.send_message(f"🍜 Подробно опиши, что съел. Это можно сделать текстом или в виде голосового сообщения.\n\n Например:\n\n «<i>{example_text}</i>»", parse_mode="HTML", reply_markup=None)
     return ADD_MEAL
 
 
@@ -1229,7 +1250,7 @@ async def show_last_7_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for meal in meals:
         date_str = meal['timestamp'].split()[0]
         date_friendly = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
-        daily_meals[date_friendly].append(f"▪️ {meal['food_text']} — {meal['calories']} ккал")
+        daily_meals[date_friendly].append(f"🔹 {meal['food_text']} — {meal['calories']} ккал")
         total_per_day[date_friendly] += meal['calories']
 
     message = "🗓 <b>Меню за последние 7 дней</b>:\n\n"
