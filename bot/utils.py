@@ -4,8 +4,8 @@ import json
 def get_main_menu():
     from telegram import ReplyKeyboardMarkup
     keyboard = [
-        ["📝 Добавить приём пищи"],
-        ["👤 Профиль", "📊 Статистика"]
+        ["📝 Добавить приём пищи", "👤 Профиль"],
+        ["📊 Статистика", "⚙️ Настройки"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 

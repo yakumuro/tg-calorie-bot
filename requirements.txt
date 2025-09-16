@@ -3,3 +3,5 @@ requests
 python-dotenv
 aiohttp
 matplotlib
+pytz
+python-telegram-bot[job-queue]

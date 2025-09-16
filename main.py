@@ -1,6 +1,7 @@
 from logger_config import logger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ConversationHandler
 from config.config import TELEGRAM_TOKEN
+from bot.reminder_scheduler import setup_scheduler
 from bot.database import init_db
 from bot.handlers import (
     conv_handler,
@@ -41,6 +42,8 @@ from bot.handlers import (
     show_goal_chart,
     show_current_progress,
     voice_message_handler,
+    toggle_notifications_handler,
+    settings_handler
 )
 
 
@@ -94,6 +97,8 @@ def main():
     app.add_handler(set_rate_gain_slow_handler)
     app.add_handler(set_rate_gain_medium_handler)
     app.add_handler(set_rate_gain_fast_handler)
+    app.add_handler(toggle_notifications_handler)
+    app.add_handler(settings_handler)
 
     # 5. Обработчики графиков
     app.add_handler(CallbackQueryHandler(show_weekly_chart, pattern="chart_week"))
@@ -114,6 +119,7 @@ def main():
 
     # 8. Обработчик ошибок
     app.add_error_handler(error_handler)
+    setup_scheduler(app)
 
     logger.info("Handlers registered, bot running...")
     app.run_polling()

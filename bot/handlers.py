@@ -1,9 +1,9 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, ContextTypes, filters
+    ConversationHandler, ContextTypes, filters, CallbackContext
 )
-from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days
+from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days, set_notifications, get_notifications_status
 from bot.utils import calculate_daily_calories, get_main_menu, render_progress_bar
 from bot.database import calculate_macros, delete_meals_for_day
 from bot.database import get_user_goal_info, update_goal_start_date, get_goal_start_date
@@ -139,10 +139,10 @@ async def gender_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {user_id} selected gender: {query.data}")
 
     keyboard = [
-        [InlineKeyboardButton("Нет активности", callback_data='none')],
-        [InlineKeyboardButton("Минимальная", callback_data='low')],
-        [InlineKeyboardButton("Средняя", callback_data='medium')],
-        [InlineKeyboardButton("Высокая", callback_data='high')]
+        [InlineKeyboardButton("Нет активности (сидячий образ жизни)", callback_data='none')],
+        [InlineKeyboardButton("Минимальная (работа на ногах)", callback_data='low')],
+        [InlineKeyboardButton("Средняя (1-3 тренировки в неделю)", callback_data='medium')],
+        [InlineKeyboardButton("Высокая (3-5 тренировок в неделю)", callback_data='high')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.reply_text("Выбери уровень активности:", reply_markup=reply_markup)
@@ -414,7 +414,7 @@ async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TY
                     goal_start_date=goal_start_date
                 )
                 await update.message.reply_text(
-                    f"✅ Вес обновлён!\nНовая норма: {new_calories} ккал\n"
+                    f"✅ Вес обновлён!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
                     f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
                     parse_mode="HTML", reply_markup=get_main_menu()
                 )
@@ -443,7 +443,7 @@ async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TY
                     goal_start_date=goal_start_date
                 )
                 await update.message.reply_text(
-                    f"✅ Рост обновлён!\nНовая норма: {new_calories} ккал\n"
+                    f"✅ Рост обновлён!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
                     f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
                     parse_mode="HTML", reply_markup=get_main_menu()
                 )
@@ -471,7 +471,7 @@ async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TY
                     goal_start_date=goal_start_date
                 )
                 await update.message.reply_text(
-                    f"✅ Возраст обновлён!\nНовая норма: {new_calories} ккал\n"
+                    f"✅ Возраст обновлён!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
                     f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
                     parse_mode="HTML", reply_markup=get_main_menu()
                 )
@@ -566,7 +566,7 @@ async def set_gender_male(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     await query.message.chat.send_message(
-        f"✅ Пол обновлён!\nНовая норма: {new_calories} ккал\n"
+        f"✅ Пол обновлён!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
         f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
         parse_mode="HTML", reply_markup=get_main_menu()
     )
@@ -649,7 +649,7 @@ async def set_activity_none(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     await query.message.chat.send_message(
-        f"✅ Активность обновлена!\nНовая норма: {new_calories} ккал\n"
+        f"✅ Активность обновлена!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
         f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
         parse_mode="HTML", reply_markup=get_main_menu()
     )
@@ -915,10 +915,10 @@ async def set_goal_with_rate(update: Update, context: ContextTypes.DEFAULT_TYPE,
         pass
     
     await query.message.chat.send_message(
-        f"✅ Цель обновлена!\n"
-        f" {('Похудеть' if goal_type=='lose' else 'Набрать')} ({kg_per_week} кг/нед)\n"
-        f" Целевой вес: {target_weight} кг\n"
-        f" Норма с учётом цели: {daily_calories} ккал\n"
+        f"✅ Цель обновлена!\n\n"
+        f"🎯 {('Похудеть' if goal_type=='lose' else 'Набрать')} ({kg_per_week} кг/нед)\n"
+        f"🎯 Целевой вес: {target_weight} кг\n"
+        f"🎯 Норма калорий с учётом цели: {daily_calories} ккал\n\n"
         f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
         parse_mode="HTML",
         reply_markup=get_main_menu()
@@ -1185,16 +1185,15 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     goal_info = get_user_goal_info(user_id)
     
     keyboard = [
-        [InlineKeyboardButton("📅 Меню за 7 дней", callback_data="last_7_days"),
-         InlineKeyboardButton("📊 График за неделю", callback_data="chart_week")],
-        [InlineKeyboardButton("📊 График за месяц", callback_data="chart_month"),
+        [InlineKeyboardButton("📊 График за неделю", callback_data="chart_week"),
+         InlineKeyboardButton("📊 График за месяц", callback_data="chart_month")],
+        [InlineKeyboardButton("📅 История за неделю", callback_data="last_7_days"),
          InlineKeyboardButton("🗑 Очистить еду за сегодня", callback_data="clear_today")]
     ]
     
     # Добавляем кнопки для целей если они есть
     if goal_info:
-        keyboard.append([InlineKeyboardButton("🎯 График цели", callback_data="goal_chart")])
-        keyboard.append([InlineKeyboardButton("📈 Текущий прогресс", callback_data="current_progress")])
+        keyboard.append([InlineKeyboardButton("🎯 График цели", callback_data="goal_chart"), InlineKeyboardButton("📈 Текущий прогресс", callback_data="current_progress")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1612,10 +1611,55 @@ async def goal_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ConversationHandler.END
 
+async def settings_menu(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    status = get_notifications_status(user_id)
+    logger.info(f"Open setting menu {user_id}")
+
+    notif_text = "🔔 Уведомления: [Включены]" if status else "🔕 Уведомления: [Выключены]"
+
+    keyboard = [
+        [InlineKeyboardButton(notif_text, callback_data="toggle_notifications")],
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.callback_query:  # если вызвано из кнопки
+        await update.callback_query.edit_message_text(
+            "⚙ Настройки:\n\nЗдесь вы можете управлять общими настройками бота. Если остались вопросы, можете написать @yakumuro", reply_markup=reply_markup
+        )
+    else:  # если вызвано командой /settings
+        await update.message.reply_text("⚙ Настройки:\n\n Здесь вы можете управлять общими настройками бота. Если остались вопросы, можете написать @yakumuro", reply_markup=reply_markup)
+
+# Уведомления пользователей раз в 16 часов
+async def toggle_notifications(update: Update, context: CallbackContext):
+    query = update.callback_query
+    user_id = query.from_user.id
+
+    # Проверяем текущий статус
+    current_status = get_notifications_status(user_id)
+    new_status = not current_status
+
+    # Обновляем в БД
+    set_notifications(user_id, new_status)
+    logger.info(f"Edit settings notification {user_id}: {new_status}")
+
+    # Отвечаем пользователю
+    status_text = "✅ Уведомления включены" if new_status else "🚫 Уведомления выключены"
+    await query.answer()
+    await query.edit_message_text(
+        text=f"{status_text}\n\nМожно вернуться и поменять в любой момент.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔔 Переключить снова", callback_data="toggle_notifications")]
+        ])
+    )
+
 
 # --- Обработчики ---
 profile_handler = MessageHandler(filters.Regex("^👤 Профиль$"), profile)
 stats_handler = MessageHandler(filters.Regex("^📊 Статистика$"), stats)
+settings_handler = MessageHandler(filters.Regex("^⚙️ Настройки"), settings_menu)
+
 
 meal_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex("^📝 Добавить приём пищи$"), add_meal_start)],
@@ -1683,3 +1727,4 @@ last_7_days_handler = CallbackQueryHandler(show_last_7_days, pattern="^last_7_da
 goal_callback_handler = CallbackQueryHandler(goal_handler, pattern="^goal_")
 goal_rate_callback_handler = CallbackQueryHandler(goal_rate_handler, pattern="^rate_")
 voice_message_handler = MessageHandler(filters.VOICE, add_food_voice)
+toggle_notifications_handler = CallbackQueryHandler(toggle_notifications, pattern="toggle_notifications")

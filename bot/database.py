@@ -29,7 +29,8 @@ def init_db():
             goal_type TEXT DEFAULT 'maintain',
             target_weight REAL,
             goal_rate TEXT,
-            goal_start_date TEXT         
+            goal_start_date TEXT,
+            notifications_enabled INTEGER DEFAULT 1        
         )
         ''')
 
@@ -339,3 +340,21 @@ def get_goal_start_date(user_id: int):
         return None
     finally:
         conn.close()
+
+def set_notifications(user_id: int, enabled: bool):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET notifications_enabled = ? WHERE user_id = ?",
+        (1 if enabled else 0, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+def get_notifications_status(user_id: int) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT notifications_enabled FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return bool(row[0]) if row else True  # по умолчанию True
