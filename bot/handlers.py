@@ -1216,6 +1216,13 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     day_calories = day_stats.get('calories') or 0
 
+    img_buffer = None
+    try:
+        img_buffer = await create_monthly_chart(user_id)
+    except Exception as e:
+        logger.error(f"Error generating monthly chart for user {user_id}: {e}")
+        img_buffer = None
+
     warning_text_today = ""
     if daily_norm > 0 and day_calories > daily_norm:
         excess_today = day_calories - daily_norm
@@ -1226,7 +1233,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     goal_info = get_user_goal_info(user_id)
     
     keyboard = [
-        [InlineKeyboardButton("📊 График калорий за месяц", callback_data="chart_month")],
         [InlineKeyboardButton("📅 Список блюд за неделю", callback_data="last_7_days")],
         [InlineKeyboardButton("🗑 Очистить еду за сегодня", callback_data="clear_today")]
     ]
@@ -1237,16 +1243,28 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(
+    caption_text = (
         f"📊 <b>Статистика за сегодня</b>:\n\n"
         f"⚡️Калорий:\n{progress_today_k}\n\n"
         f"🥩Белков:\n{progress_today_p}\n\n"
         f"🥑Жиров:\n{progress_today_f}\n\n"
         f"🍞Углеводов:\n{progress_today_c}\n\n"
-        f"{warning_text_today}",
-        parse_mode="HTML",
-        reply_markup=reply_markup
-    )
+        f"{warning_text_today}"
+        )
+
+    if img_buffer:
+        await update.message.reply_photo(
+            photo=img_buffer,
+            caption=caption_text,
+            parse_mode="HTML",
+            reply_markup=reply_markup
+            )
+    else:
+        await update.message.reply_text(
+            text=caption_text,
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
 
 async def show_last_7_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1390,32 +1408,6 @@ async def show_current_progress(update: Update, context: ContextTypes.DEFAULT_TY
         await query.message.reply_photo(
             photo=img_buffer,
             caption="📈 Текущий прогресс достижения цели",
-            reply_markup=get_main_menu()
-        )
-        
-    except Exception as e:
-        logger.error(f"Error generating for user {user_id}: {e}")
-        await query.message.reply_text(
-            "❌ Ошибка создания графика. Попробуйте позже.",
-            reply_markup=get_main_menu()
-        )
-
-async def show_monthly_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    logger.info(f"User {user_id} requested monthly chart")
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = update.effective_user.id
-    
-    try:
-        # Создаем график
-        img_buffer = await create_monthly_chart(user_id)
-        
-        # Отправляем как фото
-        await query.message.reply_photo(
-            photo=img_buffer,
-            caption="📊 График калорий за месяц",
             reply_markup=get_main_menu()
         )
         
