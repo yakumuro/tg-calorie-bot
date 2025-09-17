@@ -973,11 +973,12 @@ async def process_food_text(update, context, food_text: str):
         await context.bot.send_chat_action(update.effective_chat.id, "typing")
         if len(food_text) > 500:
             await update.message.reply_text(
-            "⚠️ Текст слишком длинный — максимум 500 символов. Сократи, пожалуйста, описание (укажи только порции и ингредиенты).",
-            reply_markup=get_main_menu()
+                "⚠️ Текст слишком длинный — максимум 500 символов. Сократи, пожалуйста, описание (укажи только порции и ингредиенты).",
+                reply_markup=get_main_menu()
             )
             logger.error(f"Max 500 simbols")
             return ADD_MEAL  # остаёмся в состоянии ввода пищи
+
         try:
             result = await call_gpt_with_limits(
                 update.effective_user.id,
@@ -985,7 +986,7 @@ async def process_food_text(update, context, food_text: str):
                 food_text,
                 YANDEX_GPT_API_KEY,
                 YANDEX_GPT_FOLDER_ID
-                )
+            )
         except RateLimitExceeded as e:
             await update.message.reply_text(
                 f"⏳ Слишком много запросов — попробуйте ещё через {e.retry_after} секунд.",
@@ -1000,21 +1001,29 @@ async def process_food_text(update, context, food_text: str):
             )
             return ConversationHandler.END
 
+        # 🟢 Безопасная обработка None
         items = result.get("items", [])
-        totals = result.get("total", {"calories": 0, "protein": 0, "fat": 0, "carbs": 0})
+        totals = result.get("total", {})
+        totals_clean = {
+            "calories": totals.get("calories") or 0,
+            "protein": totals.get("protein") or 0,
+            "fat": totals.get("fat") or 0,
+            "carbs": totals.get("carbs") or 0
+        }
 
         context.user_data['pending_meal'] = {
             'food_text': food_text,
-            'calories': totals["calories"],
-            'protein': totals["protein"],
-            'fat': totals["fat"],
-            'carbs': totals["carbs"],
+            'calories': totals_clean["calories"],
+            'protein': totals_clean["protein"],
+            'fat': totals_clean["fat"],
+            'carbs': totals_clean["carbs"],
             'items': items
         }
+
         logger.info(
-        f"User {user_id} GPT recognized items: {len(items)} items, "
-        f"total_calories={totals['calories']}, protein={totals['protein']}, "
-        f"fat={totals['fat']}, carbs={totals['carbs']}"
+            f"User {user_id} GPT recognized items: {len(items)} items, "
+            f"total_calories={totals_clean['calories']}, protein={totals_clean['protein']}, "
+            f"fat={totals_clean['fat']}, carbs={totals_clean['carbs']}"
         )
 
         # Удаляем сообщение "обрабатываем"
@@ -1025,11 +1034,10 @@ async def process_food_text(update, context, food_text: str):
             pass
 
         # Формируем текст с продуктами и прогрессом
-        user_id = update.effective_user.id
         stats_data = get_stats(user_id)
         daily_norm = get_user(user_id)["daily_calories"]
         already_eaten = stats_data['day']['calories'] or 0
-        projected = already_eaten + totals['calories'] or 0
+        projected = already_eaten + totals_clean['calories']
 
         progress_after = render_progress_bar(projected, daily_norm)
 
@@ -1039,8 +1047,8 @@ async def process_food_text(update, context, food_text: str):
             warning_text = f"\n⚠️ <b>Внимание:</b> После добавления норма будет превышена на <b>{excess:.0f} ккал</b>!\n"
 
         product_list = "\n".join(
-            [f"🔹 {i['product']} — {i['quantity']} — {i['calories']} ккал, "
-             f"Б: {i['protein']} г, Ж: {i['fat']} г, У: {i['carbs']} г" for i in items]
+            [f"🔹 {i['product']} — {i['quantity']} — {i.get('calories') or 0} ккал, "
+             f"Б: {i.get('protein') or 0} г, Ж: {i.get('fat') or 0} г, У: {i.get('carbs') or 0} г" for i in items]
         )
 
         summary = f"""
@@ -1048,9 +1056,9 @@ async def process_food_text(update, context, food_text: str):
 
 {product_list}
 
-<b>⚡️ Итого калорий:</b> {totals['calories']} ккал  
+<b>⚡️ Итого калорий:</b> {totals_clean['calories']} ккал  
 
-🥩Б: {totals['protein']} г, 🥑Ж: {totals['fat']} г, 🍞У: {totals['carbs']} г
+🥩Б: {totals_clean['protein']} г, 🥑Ж: {totals_clean['fat']} г, 🍞У: {totals_clean['carbs']} г
 
 <b>📊 Норма после добавления:</b>
 {progress_after}
@@ -1076,6 +1084,7 @@ async def process_food_text(update, context, food_text: str):
             reply_markup=get_main_menu()
         )
         return ConversationHandler.END
+
 
 
 async def add_food_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
