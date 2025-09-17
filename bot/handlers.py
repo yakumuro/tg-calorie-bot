@@ -8,8 +8,9 @@ from bot.utils import calculate_daily_calories, get_main_menu, render_progress_b
 from bot.database import calculate_macros, delete_meals_for_day
 from bot.database import get_user_goal_info, update_goal_start_date, get_goal_start_date
 from bot.yandex_gpt import analyze_food_with_gpt
+from bot.rate_limiter import call_gpt_with_limits, RateLimitExceeded
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
-from datetime import datetime, date
+from datetime import datetime
 from collections import defaultdict
 from bot.charts import create_weekly_chart, create_monthly_chart
 from bot.yandex_speechkit import YandexSpeechToText
@@ -970,7 +971,34 @@ async def process_food_text(update, context, food_text: str):
 
     try:
         await context.bot.send_chat_action(update.effective_chat.id, "typing")
-        result = await analyze_food_with_gpt(food_text, YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID)
+        if len(food_text) > 500:
+            await update.message.reply_text(
+            "⚠️ Текст слишком длинный — максимум 500 символов. Сократи, пожалуйста, описание (укажи только порции и ингредиенты).",
+            reply_markup=get_main_menu()
+            )
+            logger.error(f"Max 500 simbols")
+            return ADD_MEAL  # остаёмся в состоянии ввода пищи
+        try:
+            result = await call_gpt_with_limits(
+                update.effective_user.id,
+                analyze_food_with_gpt,
+                food_text,
+                YANDEX_GPT_API_KEY,
+                YANDEX_GPT_FOLDER_ID
+                )
+        except RateLimitExceeded as e:
+            await update.message.reply_text(
+                f"⏳ Слишком много запросов — попробуйте ещё через {e.retry_after} секунд.",
+                reply_markup=get_main_menu()
+            )
+            return ADD_MEAL
+        except Exception as e:
+            logger.error(f"GPT error (wrapped): {e}")
+            await update.message.reply_text(
+                "⚠️ Не удалось распознать. Попробуй позже.",
+                reply_markup=get_main_menu()
+            )
+            return ConversationHandler.END
 
         items = result.get("items", [])
         totals = result.get("total", {"calories": 0, "protein": 0, "fat": 0, "carbs": 0})
@@ -1057,7 +1085,10 @@ async def add_food_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {user_id} sent a voice message for meal input")
 
     if not voice:
-        await update.message.reply_text("Не удалось получить голосовое сообщение 😔")
+        await update.message.reply_text("⚠️ Не удалось получить голосовое сообщение.")
+        return ADD_MEAL
+    if voice.duration > 30:
+        await update.message.reply_text("⚠️ Голосовое сообщение слишком длинное (максимум 30 секунд). Попробуй записать короче.")
         return ADD_MEAL
 
     file = await context.bot.get_file(voice.file_id)
@@ -1074,7 +1105,7 @@ async def add_food_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"User {user_id} voice processing error: {e}")
-        await update.message.reply_text(f"Ошибка при обработке голосового: {e}")
+        await update.message.reply_text(f"⚠️ Ошибка при обработке голосового: {e}")
         return ADD_MEAL
 
     finally:
@@ -1094,7 +1125,7 @@ async def confirm_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     pending = context.user_data.get('pending_meal')
     if not pending:
-        await query.message.reply_text("❌ Данные устарели. Попробуй снова.")
+        await query.message.reply_text("⚠️ Данные устарели. Попробуй снова.")
         return ConversationHandler.END
 
     add_meal(
