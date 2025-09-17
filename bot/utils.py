@@ -32,4 +32,4 @@ def render_progress_bar(current, total, length=20):
     ratio = min(current / total, 1)
     filled = int(length * ratio)
     empty = length - filled
-    return f"[{'▓' * filled}{'▒' * empty}] {current}/{total} ккал"
+    return f"[{'▓' * filled}{'▒' * empty}] {current}/{total}"

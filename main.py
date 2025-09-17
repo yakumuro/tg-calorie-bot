@@ -37,7 +37,6 @@ from bot.handlers import (
     set_rate_gain_medium_handler,
     set_rate_gain_fast_handler,
     handle_all_text_input,
-    show_weekly_chart,
     show_monthly_chart,
     show_goal_chart,
     show_current_progress,
@@ -101,7 +100,6 @@ def main():
     app.add_handler(settings_handler)
 
     # 5. Обработчики графиков
-    app.add_handler(CallbackQueryHandler(show_weekly_chart, pattern="chart_week"))
     app.add_handler(CallbackQueryHandler(show_monthly_chart, pattern="chart_month"))
     app.add_handler(CallbackQueryHandler(show_goal_chart, pattern="goal_chart"))
     app.add_handler(CallbackQueryHandler(show_current_progress, pattern="current_progress"))

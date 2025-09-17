@@ -12,7 +12,7 @@ from bot.rate_limiter import call_gpt_with_limits, RateLimitExceeded
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
 from datetime import datetime
 from collections import defaultdict
-from bot.charts import create_weekly_chart, create_monthly_chart
+from bot.charts import create_monthly_chart
 from bot.yandex_speechkit import YandexSpeechToText
 import os
 from logger_config import logger
@@ -1195,6 +1195,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = get_user(user_id)
     logger.info(f"User {user_id} requested stats")
+    
 
     if not user:
         await update.message.reply_text("Нет профиля. /start", reply_markup=None)
@@ -1206,59 +1207,43 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     carbs_norm = user["carbs_norm"] or 0
 
     stats_data = get_stats(user_id)
-    progress_today = render_progress_bar(stats_data['day']['calories'], daily_norm)
+    progress_today_k = render_progress_bar(stats_data['day']['calories'], daily_norm)
+    progress_today_p = render_progress_bar(stats_data['day']['protein'], protein_norm)
+    progress_today_f = render_progress_bar(stats_data['day']['fat'], fat_norm)
+    progress_today_c = render_progress_bar(stats_data['day']['carbs'], carbs_norm)
 
     day_stats = stats_data.get('day', {})
-    week_stats = stats_data.get('week', {})
-    month_stats = stats_data.get('month', {})
 
     day_calories = day_stats.get('calories') or 0
-    day_protein = day_stats.get('protein') or 0
-    day_fat = day_stats.get('fat') or 0
-    day_carbs = day_stats.get('carbs') or 0
-
-    week_calories = week_stats.get('calories') or 0
-    week_protein = week_stats.get('protein') or 0
-    week_fat = week_stats.get('fat') or 0
-    week_carbs = week_stats.get('carbs') or 0
-
-    month_calories = month_stats.get('calories') or 0
-    month_protein = month_stats.get('protein') or 0
-    month_fat = month_stats.get('fat') or 0
-    month_carbs = month_stats.get('carbs') or 0
 
     warning_text_today = ""
     if daily_norm > 0 and day_calories > daily_norm:
         excess_today = day_calories - daily_norm
-        warning_text_today = f"⚠️ <b>Превышение:</b> +{excess_today:.0f} ккал"
+        warning_text_today = f"⚠️ <b>Обратите внимание!</b> Вы превышаете норму калорий на {excess_today:.0f} ккал"
         logger.warning(f"User {user_id} exceeded daily calories by {excess_today} kcal")
 
     # Проверяем есть ли цель
     goal_info = get_user_goal_info(user_id)
     
     keyboard = [
-        [InlineKeyboardButton("📊 График за неделю", callback_data="chart_week"),
-         InlineKeyboardButton("📊 График за месяц", callback_data="chart_month")],
-        [InlineKeyboardButton("📅 История за неделю", callback_data="last_7_days"),
-         InlineKeyboardButton("🗑 Очистить еду за сегодня", callback_data="clear_today")]
+        [InlineKeyboardButton("📊 График калорий за месяц", callback_data="chart_month")],
+        [InlineKeyboardButton("📅 Список блюд за неделю", callback_data="last_7_days")],
+        [InlineKeyboardButton("🗑 Очистить еду за сегодня", callback_data="clear_today")]
     ]
     
     # Добавляем кнопки для целей если они есть
     if goal_info:
-        keyboard.append([InlineKeyboardButton("🎯 График цели", callback_data="goal_chart"), InlineKeyboardButton("📈 Текущий прогресс", callback_data="current_progress")])
+        keyboard.append([InlineKeyboardButton("📈 Текущий прогресс", callback_data="current_progress")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        f"📊 <b>Статистика</b>:\n\n"
-        f"<b>Сегодня</b>:\n\n"
-        f"Каллорий: {progress_today}\n\n"
-        f"{warning_text_today}\n\n"
-        f"🥩Белков: {day_protein} / {protein_norm} г\n"
-        f"🥑Жиров: {day_fat} / {fat_norm} г\n"
-        f"🍞Углеводов: {day_carbs} / {carbs_norm} г\n\n"
-        f"<b>📅Неделя</b>: {week_calories} ккал (Б: {week_protein} г, Ж: {week_fat} г, У: {week_carbs} г)\n"
-        f"<b>📅Месяц</b>: {month_calories} ккал (Б: {month_protein} г, Ж: {month_fat} г, У: {month_carbs} г)",
+        f"📊 <b>Статистика за сегодня</b>:\n\n"
+        f"⚡️Калорий:\n{progress_today_k}\n\n"
+        f"🥩Белков:\n{progress_today_p}\n\n"
+        f"🥑Жиров:\n{progress_today_f}\n\n"
+        f"🍞Углеводов:\n{progress_today_c}\n\n"
+        f"{warning_text_today}",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
@@ -1308,7 +1293,7 @@ async def clear_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"✅ История еды за сегодня удалена.", reply_markup=get_main_menu())
     else:
         logger.info(f"User {user_id} tried to clear meals but none were added today")
-        await query.message.reply_text(f"ℹ️ За сегодня нет добавленных приёмов пищи.", reply_markup=get_main_menu())
+        await query.message.reply_text(f"⚠️ За сегодня нет добавленных приёмов пищи.", reply_markup=get_main_menu())
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1405,32 +1390,6 @@ async def show_current_progress(update: Update, context: ContextTypes.DEFAULT_TY
         await query.message.reply_photo(
             photo=img_buffer,
             caption="📈 Текущий прогресс достижения цели",
-            reply_markup=get_main_menu()
-        )
-        
-    except Exception as e:
-        logger.error(f"Error generating for user {user_id}: {e}")
-        await query.message.reply_text(
-            "❌ Ошибка создания графика. Попробуйте позже.",
-            reply_markup=get_main_menu()
-        )
-
-async def show_weekly_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    logger.info(f"User {user_id} requested weekly chart")
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = update.effective_user.id
-    
-    try:
-        # Создаем график
-        img_buffer = await create_weekly_chart(user_id)
-        
-        # Отправляем как фото
-        await query.message.reply_photo(
-            photo=img_buffer,
-            caption="📈 График калорий за неделю",
             reply_markup=get_main_menu()
         )
         
@@ -1678,12 +1637,12 @@ async def settings_menu(update: Update, context: CallbackContext):
 
     if update.callback_query:  # если вызвано из кнопки
         await update.callback_query.edit_message_text(
-            "⚙ Настройки:\n\nЗдесь вы можете управлять общими настройками бота. Если остались вопросы, можете написать @yakumuro", reply_markup=reply_markup
+            "⚙ Настройки:\n\nЗдесь вы можете управлять общими настройками бота.", reply_markup=reply_markup
         )
     else:  # если вызвано командой /settings
-        await update.message.reply_text("⚙ Настройки:\n\n Здесь вы можете управлять общими настройками бота. Если остались вопросы, можете написать @yakumuro", reply_markup=reply_markup)
+        await update.message.reply_text("⚙ Настройки:\n\nЗдесь вы можете управлять общими настройками бота.", reply_markup=reply_markup)
 
-# Уведомления пользователей раз в 16 часов
+# Уведомления пользователей раз в 12 часов
 async def toggle_notifications(update: Update, context: CallbackContext):
     query = update.callback_query
     user_id = query.from_user.id
