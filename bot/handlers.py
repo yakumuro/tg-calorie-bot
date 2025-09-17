@@ -1239,7 +1239,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Добавляем кнопки для целей если они есть
     if goal_info:
-        keyboard.append([InlineKeyboardButton("📈 Текущий прогресс", callback_data="current_progress")])
+        keyboard.append([InlineKeyboardButton("📈 График достижения цели", callback_data="current_progress")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1396,7 +1396,7 @@ async def show_current_progress(update: Update, context: ContextTypes.DEFAULT_TY
         from bot.database import get_goal_start_date
         
         start_date = get_goal_start_date(user_id)
-        img_buffer = await create_current_progress_chart(
+        img_buffer, goal_date = await create_current_progress_chart(
             user_id, 
             goal_info['current_weight'], 
             goal_info['target_weight'], 
@@ -1404,10 +1404,16 @@ async def show_current_progress(update: Update, context: ContextTypes.DEFAULT_TY
             goal_info['goal_rate'],
             start_date
         )
+        goal_date_str = goal_date.strftime("%d.%m.%Y")
         
         await query.message.reply_photo(
             photo=img_buffer,
-            caption="📈 Текущий прогресс достижения цели",
+            caption=f"📈 График достижения цели\n\n"
+                   f"Цель: {'Похудеть' if goal_info['goal_type']=='lose' else 'Набрать'}\n"
+                   f"Текущий вес: {goal_info['current_weight']} кг\n"
+                   f"Целевой вес: {goal_info['target_weight']} кг\n"
+                   f"Темп: {goal_info['goal_rate']}\n"
+                   f"Дата достижения: {goal_date_str}",
             reply_markup=get_main_menu()
         )
         

@@ -144,7 +144,7 @@ async def create_goal_progress_chart(user_id: int, current_weight: float, target
     return img_buffer, dates[-1]  # Возвращаем также дату достижения цели
 
 async def create_current_progress_chart(user_id: int, current_weight: float, target_weight: float, 
-                                      goal_type: str, goal_rate: str, start_date: datetime = None):
+                                        goal_type: str, goal_rate: str, start_date: datetime = None):
     """Создает график текущего прогресса с отметкой где должен быть вес сейчас"""
     
     logger.info(f"Creating current progress chart for user {user_id}")
@@ -157,7 +157,7 @@ async def create_current_progress_chart(user_id: int, current_weight: float, tar
         logger.error(f"Invalid goal_rate format: {goal_rate}")
         kg_per_week = 0.5  # fallback
     
-    # Если дата начала не указана, используем текущую дату с предупреждением
+    # Если дата начала не указана, используем текущую дату
     if start_date is None:
         start_date = datetime.now()
         logger.warning(f"No start date provided for user {user_id}, using current date: {start_date}")
@@ -171,26 +171,35 @@ async def create_current_progress_chart(user_id: int, current_weight: float, tar
     # Рассчитываем какой вес должен быть сейчас
     if goal_type == "lose":
         expected_weight = current_weight - (kg_per_week * weeks_passed)
-        expected_weight = max(expected_weight, target_weight)  # Не ниже целевого веса
+        expected_weight = max(expected_weight, target_weight)
     else:  # gain
         expected_weight = current_weight + (kg_per_week * weeks_passed)
-        expected_weight = min(expected_weight, target_weight)  # Не выше целевого веса
+        expected_weight = min(expected_weight, target_weight)
     
     logger.info(f"Expected weight: {expected_weight:.2f} kg")
     
-    # Создаем данные для графика (последние 8 недель)
-    weeks_data = []
-    weights_data = []
-    expected_weights = []
+    # Рассчитываем дату достижения цели
+    if goal_type == "lose":
+        weeks_to_goal = (current_weight - target_weight) / kg_per_week if kg_per_week > 0 else 0
+    else:  # gain
+        weeks_to_goal = (target_weight - current_weight) / kg_per_week if kg_per_week > 0 else 0
     
-    for i in range(8):
+    goal_date = start_date + timedelta(weeks=weeks_to_goal)
+    
+    # Генерируем данные для графика (всегда до даты цели, минимум 8 недель)
+    num_weeks = max(8, int(weeks_to_goal) + 1)
+    weeks_data = []
+    expected_weights = []
+    weights_data = []
+    
+    for i in range(num_weeks):
         week_date = start_date.date() + timedelta(weeks=i)
         if goal_type == "lose":
             expected = current_weight - (kg_per_week * i)
-            expected = max(expected, target_weight)  # Не ниже целевого веса
+            expected = max(expected, target_weight)
         else:
             expected = current_weight + (kg_per_week * i)
-            expected = min(expected, target_weight)  # Не выше целевого веса
+            expected = min(expected, target_weight)
         
         weeks_data.append(week_date)
         expected_weights.append(expected)
@@ -199,53 +208,40 @@ async def create_current_progress_chart(user_id: int, current_weight: float, tar
     # Создаем график
     fig, ax = plt.subplots(figsize=(12, 6))
     
-    # Строим линию ожидаемого прогресса
+    # Линия ожидаемого прогресса
     ax.plot(weeks_data, expected_weights, color='#4CAF50', linewidth=2, 
             linestyle='--', alpha=0.7, label='Ожидаемый прогресс')
     
-    # Отмечаем текущую дату
+    # Текущая дата и отметки
     current_date = datetime.now().date()
     ax.axvline(x=current_date, color='red', linestyle='-', alpha=0.7, label='Сегодня')
-    
-    # Отмечаем текущий вес
     ax.scatter([current_date], [current_weight], color='red', s=100, zorder=5, label='Изначальный вес')
-    
-    # Отмечаем ожидаемый вес на сегодня
     ax.scatter([current_date], [expected_weight], color='blue', s=100, zorder=5, label='Ожидаемый вес')
     
-    # Настраиваем оси
+    # Настройка осей
     ax.set_xlabel('Дата', fontsize=12)
     ax.set_ylabel('Вес (кг)', fontsize=12)
     ax.set_title('Текущий прогресс', fontsize=14, fontweight='bold')
     
-    # Настраиваем подписи на оси X
-    ax.set_xticks(weeks_data[::2])
-    ax.set_xticklabels([date.strftime('%d.%m') for date in weeks_data[::2]], rotation=45)
+    # Подписи на оси X (равномерно распределяем)
+    step = max(1, len(weeks_data)//10)
+    ax.set_xticks(weeks_data[::step])
+    ax.set_xticklabels([date.strftime('%d.%m') for date in weeks_data[::step]], rotation=45)
     
-    # Добавляем сетку
+    # Сетка и легенда
     ax.grid(True, alpha=0.3)
     ax.set_axisbelow(True)
-    
-    # Добавляем легенду
     ax.legend()
     
-    # Добавляем информацию о прогрессе
-    # progress_diff = abs(expected_weight - current_weight)
-    # if expected_weight > current_weight:
-    #     progress_text = f"Отставание: {progress_diff:.1f} кг"
-    # else:
-    #     progress_text = f"Опережение: {progress_diff:.1f} кг"
-    
+    # Информация о прогрессе
     progress_info = f"Изначальный вес: {current_weight:.1f} кг\nОжидаемый: {expected_weight:.1f} кг"
-    
     ax.text(0.02, 0.98, progress_info, transform=ax.transAxes, fontsize=10,
             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
     
-    # Добавляем информацию о дате начала
+    # Дата начала
     ax.text(0.02, 0.02, f"Начало: {start_date.strftime('%d.%m.%Y')}", transform=ax.transAxes, 
             fontsize=8, alpha=0.7, bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.5))
     
-    # Настраиваем отступы
     plt.tight_layout()
     
     # Сохраняем в байты
@@ -255,4 +251,5 @@ async def create_current_progress_chart(user_id: int, current_weight: float, tar
     plt.close()
     
     logger.info(f"Progress chart created successfully for user {user_id}")
-    return img_buffer
+    return img_buffer, goal_date
+
