@@ -4,10 +4,10 @@ from telegram.ext import (
     ConversationHandler, ContextTypes, filters, CallbackContext
 )
 from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days, set_notifications, get_notifications_status
-from bot.utils import calculate_daily_calories, get_main_menu, render_progress_bar
+from bot.utils import calculate_daily_calories, get_main_menu, render_progress_bar, render_menu_to_image
 from bot.database import calculate_macros, delete_meals_for_day
 from bot.database import get_user_goal_info, update_goal_start_date, get_goal_start_date
-from bot.yandex_gpt import analyze_food_with_gpt
+from bot.yandex_gpt import analyze_food_with_gpt, analyze_menu_with_gpt
 from bot.rate_limiter import call_gpt_with_limits, RateLimitExceeded
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
 from datetime import datetime
@@ -28,6 +28,9 @@ NAME, WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY, GOAL, TARGET_WEIGHT, GOAL_RATE = ra
 EDIT_NAME, EDIT_WEIGHT, EDIT_HEIGHT, EDIT_AGE, EDIT_GENDER, EDIT_ACTIVITY = range(9, 15)
 
 EDIT_GOAL, EDIT_TARGET_WEIGHT, EDIT_GOAL_RATE = range(17, 20)
+
+# Генерация меню
+CHOOSING_MEALS, TYPING_PREFS = range(2)
 
 # Добавление еды
 ADD_MEAL, AWAIT_CONFIRM = range(15, 17)
@@ -1672,15 +1675,128 @@ async def toggle_notifications(update: Update, context: CallbackContext):
         ])
     )
 
+async def start_generate_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    logger.info(f"User {user_id} started menu generation")
+    
+    keyboard = [[InlineKeyboardButton(str(i), callback_data=f"meals_{i}") for i in range(1, 6)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "🍽 Сколько приёмов пищи в день вы хотите в меню?\n\nВыберите один из вариантов:",
+        reply_markup=reply_markup
+    )
+    logger.debug("Sent meals selection keyboard")
+    return CHOOSING_MEALS
+
+
+async def choose_meals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = update.effective_user.id
+    logger.info(f"User {user_id} selected callback: {data}")
+
+    if not data.startswith("meals_"):
+        await query.edit_message_text("⚠️ Ошибка! Выберите количество приёмов пищи заново.")
+        logger.warning(f"User {user_id} sent invalid meals callback")
+        return CHOOSING_MEALS
+
+    meals_per_day = int(data.split("_")[1])
+    context.user_data["meals_per_day"] = meals_per_day
+    logger.info(f"User {user_id} chose {meals_per_day} meals per day")
+
+    await query.edit_message_text(
+        "📝 Опишите ваши ограничения или пожелания.\n\n"
+        "Например:\n"
+        "- аллергия на орехи\n"
+        "- вегетарианская диета\n"
+        "- люблю больше рыбу\n\n"
+        "⚠️ Ограничение: максимум 250 символов."
+    )
+    logger.debug("Prompted user for preferences/restrictions")
+    return TYPING_PREFS
+
+
+async def typing_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    prefs = update.message.text.strip()
+    user_id = update.effective_user.id
+    logger.info(f"User {user_id} entered preferences: {prefs[:100]}")
+
+    if len(prefs) > 250:
+        await update.message.reply_text("⚠️ Слишком длинное сообщение! Максимум 250 символов.")
+        logger.warning(f"User {user_id} exceeded preferences length")
+        return TYPING_PREFS
+
+    context.user_data["prefs"] = prefs
+
+    user_data = get_user(user_id)
+    if not user_data:
+        await update.message.reply_text("⚠️ Сначала укажите свои цели и КБЖУ в настройках профиля.")
+        logger.warning(f"User {user_id} has no profile data")
+        return ConversationHandler.END
+
+    goal = user_data.get("goal_type", "maintain")
+    daily_calories = user_data.get("daily_calories", 0)
+    protein = user_data.get("protein_norm", 0)
+    fat = user_data.get("fat_norm", 0)
+    carbs = user_data.get("carbs_norm", 0)
+    meals_per_day = context.user_data.get("meals_per_day", 3)
+    prefs_and_restrictions = context.user_data.get("prefs", "")
+
+    api_key = YANDEX_GPT_API_KEY
+    folder_id = YANDEX_GPT_FOLDER_ID
+
+    await update.message.reply_text("⏳ Генерирую меню на сегодня, пожалуйста подождите...")
+    logger.info(f"User {user_id}: sending GPT request with goal={goal}, meals_per_day={meals_per_day}")
+
+    try:
+        menu_data = await analyze_menu_with_gpt(
+            user_goal=goal,
+            daily_calories=daily_calories,
+            protein_norm=protein,
+            fat_norm=fat,
+            carbs_norm=carbs,
+            meals_per_day=meals_per_day,
+            prefs_and_restrictions=prefs_and_restrictions,
+            api_key=api_key,
+            folder_id=folder_id
+        )
+        logger.info(f"User {user_id}: GPT menu received successfully")
+
+        image_path = render_menu_to_image(menu_data, user_id)
+        logger.info(f"User {user_id}: menu image rendered at {image_path}")
+
+        with open(image_path, "rb") as img:
+            await update.message.reply_photo(img, caption="✅ Вот ваше меню на сегодня!")
+        logger.info(f"User {user_id}: menu image sent")
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка генерации меню: {e}")
+        logger.error(f"User {user_id}: error generating menu - {e}")
+
+    return ConversationHandler.END
+
 
 # --- Обработчики ---
 profile_handler = MessageHandler(filters.Regex("^👤 Профиль$"), profile)
 stats_handler = MessageHandler(filters.Regex("^📊 Статистика$"), stats)
 settings_handler = MessageHandler(filters.Regex("^⚙️ Настройки"), settings_menu)
 
+generate_menu_conv = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex("^📝 Создать меню$"), start_generate_menu)],
+    states={
+        CHOOSING_MEALS: [CallbackQueryHandler(choose_meals)],
+        TYPING_PREFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, typing_prefs)],
+    },
+    fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+    per_user=True,
+    per_chat=True
+)
+
 
 meal_conv_handler = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex("^📝 Добавить приём пищи$"), add_meal_start)],
+    entry_points=[MessageHandler(filters.Regex("^🍜 Добавить еду$"), add_meal_start)],
     states={
         ADD_MEAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_food_input), MessageHandler(filters.VOICE, add_food_voice),],
         AWAIT_CONFIRM: [

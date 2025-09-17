@@ -41,7 +41,8 @@ from bot.handlers import (
     show_current_progress,
     voice_message_handler,
     toggle_notifications_handler,
-    settings_handler
+    settings_handler,
+    generate_menu_conv,
 )
 
 
@@ -97,6 +98,7 @@ def main():
     app.add_handler(set_rate_gain_fast_handler)
     app.add_handler(toggle_notifications_handler)
     app.add_handler(settings_handler)
+    app.add_handler(generate_menu_conv)
 
     # 5. Обработчики графиков
     app.add_handler(CallbackQueryHandler(show_goal_chart, pattern="goal_chart"))

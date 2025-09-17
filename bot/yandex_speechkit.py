@@ -1,5 +1,3 @@
-# voice_recognition.py
-import os
 import requests
 from config.config import YANDEX_SPEECH_API_KEY
 
