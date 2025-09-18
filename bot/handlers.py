@@ -47,9 +47,9 @@ ACTIVITY_LABELS = {
 }
 
 disclaimer_text = (
-        "\n\nℹ️ Мы не врачи, все расчеты примерные. "
-        "Используйте бота как ориентир и прислушивайтесь к своему организму. "
-        "При любых сомнениях консультируйтесь со специалистом."
+        "\n\nℹ️ Я не врач, все расчеты примерные. "
+        "Используй бота как ориентир и прислушивайся к своему организму. "
+        "При любых сомнениях консультируйся со специалистом."
     )
 
 MEAL_EXAMPLES = [
@@ -70,6 +70,19 @@ MEAL_EXAMPLES = [
     "100 г рикотты, 50 г малины, 1 ч.л. мёда и 10 г миндаля"
 ]
 
+MENU_EXAMPLES = [
+    "Аллергия на орехи - больше фруктов в перекусах",
+    "Непереносимость лактозы - заменить молочные продукты на растительные аналоги",
+    "Без глютена - использовать киноа, гречку или рис вместо пшеницы",
+    "Аллергия на рыбу и морепродукты - больше блюд из курицы и индейки",
+    "Вегетарианство - добавлять больше бобовых и яиц для белка",
+    "Веганство - акцент на тофу, чечевицу и орехи (кроме аллергенов)",
+    "Без жареного - готовить на пару или запекать",
+    "Ограничение по бюджету (до 300 ₽ за порцию) - больше простых и сезонных продуктов",
+    "Минимум сладкого - добавить больше несладких перекусов (овощи, орехи, хумус)",
+    "Хочу минимум 30 г белка в каждом приёме - упор на мясо, птицу, яйца или бобовые"
+]
+
 # --- Регистрация ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -81,16 +94,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Добро пожаловать! 👋\n\n"
         "Я помогу тебе отслеживать питание и подсчитывать калории.\n\n"
         "👤 Введи свои данные, и я рассчитую твою дневную норму калорий.\n"
-        "🍜 Добавляй приёмы пищи — я подсчитаю калории, белки, жиры и углеводы.\n"
+        "🍜 Добавляй приёмы пищи - я подсчитаю калории, белки, жиры и углеводы.\n"
         "📊 Смотри свои показатели, чтобы видеть, как близко ты к своей норме.\n"
         "📝 Создавай меню на день для достижения поставленной цели\n\n"
-        "👇 Сначала введи свои данные — начнём с имени.Если что-то введёшь неправильно, потом можно будет исправить в профиле."
+        "👇 Сначала введи свои данные - начнём с имени.Если что-то введёшь неправильно, потом можно будет исправить в профиле."
     )
 
     user_text = (
             "Привет! 👋\n\n"
             "Ты уже зарегистрирован, и я знаю твою дневную норму калорий.\n\n"
-            "- 🍜 Добавляй новые приёмы пищи — я подсчитаю калории и БЖУ.\n"
+            "- 🍜 Добавляй новые приёмы пищи - я подсчитаю калории и БЖУ.\n"
             "- 📊 Смотри свои показатели, чтобы контролировать питание.\n"
             "- 📝 Создавай меню на день для достижения поставленной цели\n"
             "- 👤 Редактируй данные профиля, если что-то изменилось.\n\n"
@@ -1210,32 +1223,6 @@ async def retry_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ADD_MEAL
 
 
-
-async def cancel_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Если это callback от кнопки
-    if update.callback_query:
-        await update.callback_query.answer()
-        msg = update.callback_query.message
-    else:
-        msg = update.message
-
-    # Удаляем старое сообщение с кнопками
-    last_msg_id = context.user_data.get('last_meal_message_id')
-    if last_msg_id:
-        try:
-            await msg.chat.delete_message(last_msg_id)
-        except Exception:
-            pass
-
-    # Отправляем уведомление пользователю
-    await msg.reply_text("✖️ Ввод отменен", reply_markup=get_main_menu())
-
-    # Чистим user_data
-    context.user_data.pop('last_meal_message_id', None)
-    context.user_data.pop('pending_meal', None)
-
-    return ConversationHandler.END
-
 # --- Статистика ---
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1757,16 +1744,18 @@ async def choose_meals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         meals_per_day = 3
     context.user_data["meals_per_day"] = meals_per_day
 
+    examples_menu = random.choice(MENU_EXAMPLES)
+
     text = (
-        "☝️ Опишите ваши ограничения или пожелания (максимум 100 символов).\n\n"
-        "Например:\n- аллергия на орехи\n- вегетарианская диета\n- предпочитаю рыбу" + disclaimer_text
+        f"☝️ Опишите ваши ограничения или пожелания (максимум 100 символов).\n\n"
+        f"Например:\n\n«<i>{examples_menu}</i>»" + disclaimer_text
     )
 
     # Кнопка "Нет пожеланий"
     keyboard = [[InlineKeyboardButton("Нет предпочтений или пожеланий", callback_data="no_prefs")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(text, reply_markup=reply_markup)
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     return TYPING_PREFS
 
 
@@ -2069,6 +2058,41 @@ async def set_meal_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('reminder_count', None)
         return ConversationHandler.END
 
+# Обработчики отмены fallback
+
+async def cancel_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Если это callback от кнопки
+    if update.callback_query:
+        await update.callback_query.answer()
+        msg = update.callback_query.message
+    else:
+        msg = update.message
+
+    # Удаляем старое сообщение с кнопками
+    last_msg_id = context.user_data.get('last_meal_message_id')
+    if last_msg_id:
+        try:
+            await msg.chat.delete_message(last_msg_id)
+        except Exception:
+            pass
+
+    # Отправляем уведомление пользователю
+    await msg.reply_text("✖️ Ввод отменен", reply_markup=get_main_menu())
+
+    # Чистим user_data
+    context.user_data.pop('last_meal_message_id', None)
+    context.user_data.pop('pending_meal', None)
+
+    return ConversationHandler.END
+
+# Отмена генерации меню
+async def cancel_generate_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+    context.user_data.clear()
+    await (update.message or query.message).reply_text("✖️ Создание меню отменено.")
+    return ConversationHandler.END
 
 # Отмена ввода расписания (callback или текстовый)
 async def cancel_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2144,13 +2168,21 @@ meal_reminders_conv = ConversationHandler(
 generate_menu_conv = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex("^📝 Создать меню$"), start_generate_menu)],
     states={
-        CHOOSING_MEALS: [CallbackQueryHandler(choose_meals)],
+        CHOOSING_MEALS: [
+            CallbackQueryHandler(choose_meals),
+            # Если жмут что-то другое — выходим
+            CallbackQueryHandler(cancel_generate_menu, pattern=".*")
+        ],
         TYPING_PREFS: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, typing_prefs),
-            CallbackQueryHandler(typing_prefs, pattern="^no_prefs$")  # <-- добавлено
+            CallbackQueryHandler(typing_prefs, pattern="^no_prefs$"),
+            # Ловим все другие кнопки
+            CallbackQueryHandler(cancel_generate_menu, pattern=".*")
         ],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+    fallbacks=[
+        CommandHandler("cancel", cancel_generate_menu),
+    ],
     per_user=True,
     per_chat=True
 )
@@ -2164,16 +2196,21 @@ meal_conv_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_food_input),
             MessageHandler(filters.VOICE, add_food_voice),
             CallbackQueryHandler(cancel_meal, pattern="^cancel_meal$"),
+            # Ловим все остальные кнопки меню
+            CallbackQueryHandler(cancel_meal, pattern=".*"),
         ],
         AWAIT_CONFIRM: [
             CallbackQueryHandler(confirm_meal, pattern="^confirm_meal$"),
             CallbackQueryHandler(retry_meal, pattern="^retry_meal$"),
             CallbackQueryHandler(cancel_meal, pattern="^cancel_meal$"),
+            # Ловим все остальные кнопки меню
+            CallbackQueryHandler(cancel_meal, pattern=".*"),
         ]
     },
-    fallbacks=[CommandHandler('cancel', cancel_meal)],
-    per_user=True
+    fallbacks=[CommandHandler("cancel", cancel_meal)],
+    per_user=True,
 )
+
 
 # --- Новые обработчики (заменяют старые ConversationHandler'ы) ---
 edit_profile_handler = CallbackQueryHandler(edit_profile_start, pattern="edit_profile")
