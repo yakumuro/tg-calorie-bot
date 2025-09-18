@@ -965,105 +965,117 @@ async def add_meal_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     logger.info(f"User {user_id} started adding a meal (text input)")
 
-    example_text = random.choice(MEAL_EXAMPLES)  # выбираем случайный пример
+    example_text = random.choice(MEAL_EXAMPLES)
 
-    await update.message.reply_text(f"🍜 Подробно опиши, что съел. Это можно сделать текстом или в виде голосового сообщения.\n\n Например:\n\n «<i>{example_text}</i>»",parse_mode="HTML", reply_markup=None)
+    # Удаляем старое сообщение с кнопками, если есть
+    last_msg_id = context.user_data.get('last_meal_message_id')
+    if last_msg_id:
+        try:
+            await update.message.chat.delete_message(last_msg_id)
+        except Exception:
+            pass
+
+    keyboard = [[InlineKeyboardButton("↩️ Отменить ввод", callback_data="cancel_meal")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    msg = await update.message.reply_text(
+        f"🍜 Подробно опиши, что съел. Это можно сделать текстом или в виде голосового сообщения.\n\n"
+        f"Например:\n\n «<i>{example_text}</i>»",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+    context.user_data['last_meal_message_id'] = msg.message_id
 
     return ADD_MEAL
 
 async def process_food_text(update, context, food_text: str):
-    # 🕒 Сообщение "обрабатываем"
-    processing_msg = await update.message.reply_text("⏳ Обрабатываем ваш запрос...")
     user_id = update.effective_user.id
-    logger.info(f"User {user_id} submitted food text: {food_text}")
 
-    if not YANDEX_GPT_API_KEY or not YANDEX_GPT_FOLDER_ID:
-        await update.message.reply_text("Ошибка: GPT не настроен.", reply_markup=get_main_menu())
-        return ConversationHandler.END
-
-    try:
-        await context.bot.send_chat_action(update.effective_chat.id, "typing")
-        if len(food_text) > 300:
-            await update.message.reply_text(
-                "⚠️ Текст слишком длинный — максимум 300 символов. Сократи, пожалуйста, описание (укажи только порции и ингредиенты).",
-                reply_markup=get_main_menu()
-            )
-            logger.error(f"Max 300 simbols")
-            return ADD_MEAL  # остаёмся в состоянии ввода пищи
-
+    # Удаляем старое сообщение с кнопками
+    last_msg_id = context.user_data.get('last_meal_message_id')
+    if last_msg_id:
         try:
-            result = await call_gpt_with_limits(
-                update.effective_user.id,
-                analyze_food_with_gpt,
-                food_text,
-                YANDEX_GPT_API_KEY,
-                YANDEX_GPT_FOLDER_ID
-            )
-        except RateLimitExceeded as e:
-            await update.message.reply_text(
-                f"⏳ Слишком много запросов — попробуйте ещё через {e.retry_after} секунд.",
-                reply_markup=get_main_menu()
-            )
-            return ADD_MEAL
-        except Exception as e:
-            logger.error(f"GPT error (wrapped): {e}")
-            await update.message.reply_text(
-                "⚠️ Не удалось распознать. Попробуй позже.",
-                reply_markup=get_main_menu()
-            )
-            return ConversationHandler.END
-
-        # 🟢 Безопасная обработка None
-        items = result.get("items", [])
-        totals = result.get("total", {})
-        totals_clean = {
-            "calories": totals.get("calories") or 0,
-            "protein": totals.get("protein") or 0,
-            "fat": totals.get("fat") or 0,
-            "carbs": totals.get("carbs") or 0
-        }
-
-        context.user_data['pending_meal'] = {
-            'food_text': food_text,
-            'calories': totals_clean["calories"],
-            'protein': totals_clean["protein"],
-            'fat': totals_clean["fat"],
-            'carbs': totals_clean["carbs"],
-            'items': items
-        }
-
-        logger.info(
-            f"User {user_id} GPT recognized items: {len(items)} items, "
-            f"total_calories={totals_clean['calories']}, protein={totals_clean['protein']}, "
-            f"fat={totals_clean['fat']}, carbs={totals_clean['carbs']}"
-        )
-
-        # Удаляем сообщение "обрабатываем"
-        try:
-            await processing_msg.delete()
-        except Exception as e:
-            logger.error(f"User {user_id} GPT processing error: {e}")
+            await update.message.chat.delete_message(last_msg_id)
+        except Exception:
             pass
 
-        # Формируем текст с продуктами и прогрессом
-        stats_data = get_stats(user_id)
-        daily_norm = get_user(user_id)["daily_calories"]
-        already_eaten = stats_data['day']['calories'] or 0
-        projected = already_eaten + totals_clean['calories']
+    # Сообщение "обрабатываем"
+    processing_msg = await update.message.reply_text("⏳ Обрабатываем ваш запрос...")
+    context.user_data['last_meal_message_id'] = processing_msg.message_id
 
-        progress_after = render_progress_bar(projected, daily_norm)
-
-        warning_text = ""
-        if daily_norm > 0 and projected > daily_norm:
-            excess = projected - daily_norm
-            warning_text = f"\n⚠️ <b>Внимание:</b> После добавления норма будет превышена на <b>{excess:.0f} ккал</b>!\n"
-
-        product_list = "\n".join(
-            [f"🔹 {i['product']} — {i['quantity']} — {i.get('calories') or 0} ккал, "
-             f"Б: {i.get('protein') or 0} г, Ж: {i.get('fat') or 0} г, У: {i.get('carbs') or 0} г" for i in items]
+    # Проверка длины текста
+    if len(food_text) > 300:
+        await update.message.reply_text(
+            "⚠️ Текст слишком длинный — максимум 300 символов.",
+            reply_markup=get_main_menu()
         )
+        return ADD_MEAL
 
-        summary = f"""
+    try:
+        result = await call_gpt_with_limits(
+            update.effective_user.id,
+            analyze_food_with_gpt,
+            food_text,
+            YANDEX_GPT_API_KEY,
+            YANDEX_GPT_FOLDER_ID
+        )
+    except RateLimitExceeded as e:
+        await update.message.reply_text(
+            f"⏳ Слишком много запросов — попробуйте через {e.retry_after} секунд.",
+            reply_markup=get_main_menu()
+        )
+        return ADD_MEAL
+    except Exception as e:
+        logger.error(f"GPT error: {e}")
+        await update.message.reply_text(
+            "⚠️ Не удалось распознать. Попробуй позже.",
+            reply_markup=get_main_menu()
+        )
+        return ConversationHandler.END
+
+    # Формируем результат
+    items = result.get("items", [])
+    totals = result.get("total", {})
+    totals_clean = {
+        "calories": totals.get("calories") or 0,
+        "protein": totals.get("protein") or 0,
+        "fat": totals.get("fat") or 0,
+        "carbs": totals.get("carbs") or 0
+    }
+
+    context.user_data['pending_meal'] = {
+        'food_text': food_text,
+        'calories': totals_clean["calories"],
+        'protein': totals_clean["protein"],
+        'fat': totals_clean["fat"],
+        'carbs': totals_clean["carbs"],
+        'items': items
+    }
+
+    # Удаляем сообщение "обрабатываем"
+    try:
+        await processing_msg.delete()
+    except Exception:
+        pass
+
+    # Формируем текст с продуктами и прогрессом
+    stats_data = get_stats(user_id)
+    daily_norm = get_user(user_id)["daily_calories"]
+    already_eaten = stats_data['day']['calories'] or 0
+    projected = already_eaten + totals_clean['calories']
+    progress_after = render_progress_bar(projected, daily_norm)
+
+    warning_text = ""
+    if daily_norm > 0 and projected > daily_norm:
+        excess = projected - daily_norm
+        warning_text = f"\n⚠️ <b>Внимание:</b> После добавления норма будет превышена на <b>{excess:.0f} ккал</b>!\n"
+
+    product_list = "\n".join(
+        [f"🔹 {i['product']} — {i['quantity']} — {i.get('calories') or 0} ккал, "
+         f"Б: {i.get('protein') or 0} г, Ж: {i.get('fat') or 0} г, У: {i.get('carbs') or 0} г" for i in items]
+    )
+
+    summary = f"""
 <b>Распознано:</b>
 
 {product_list}
@@ -1076,29 +1088,19 @@ async def process_food_text(update, context, food_text: str):
 {progress_after}
 {warning_text}
 {disclaimer_text}
+    """
 
-        """
+    keyboard = [
+        [InlineKeyboardButton("✅ Подтвердить", callback_data="confirm_meal")],
+        [InlineKeyboardButton("🔁 Ввести заново", callback_data="retry_meal")],
+        [InlineKeyboardButton("↩️ Отменить ввод", callback_data="cancel_meal")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-        keyboard = [
-            [InlineKeyboardButton("✅ Подтвердить", callback_data="confirm_meal")],
-            [InlineKeyboardButton("🔁 Ввести заново", callback_data="retry_meal")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+    msg = await update.message.reply_text(summary.strip(), reply_markup=reply_markup, parse_mode="HTML")
+    context.user_data['last_meal_message_id'] = msg.message_id
 
-        msg = await update.message.reply_text(summary.strip(), reply_markup=reply_markup, parse_mode="HTML")
-        context.user_data['last_meal_message_id'] = msg.message_id
-
-        return AWAIT_CONFIRM
-
-    except Exception as e:
-        logger.error(f"GPT error: {e}")
-        await update.message.reply_text(
-            "❌ Не удалось распознать. Попробуй описать подробнее.",
-            reply_markup=get_main_menu()
-        )
-        return ConversationHandler.END
-
-
+    return AWAIT_CONFIRM
 
 async def add_food_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1208,7 +1210,28 @@ async def retry_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Добавление отменено.", reply_markup=get_main_menu())
+    # Если это callback от кнопки
+    if update.callback_query:
+        await update.callback_query.answer()
+        msg = update.callback_query.message
+    else:
+        msg = update.message
+
+    # Удаляем старое сообщение с кнопками
+    last_msg_id = context.user_data.get('last_meal_message_id')
+    if last_msg_id:
+        try:
+            await msg.chat.delete_message(last_msg_id)
+        except Exception:
+            pass
+
+    # Отправляем уведомление пользователю
+    await msg.reply_text("✖️ Ввод отменен", reply_markup=get_main_menu())
+
+    # Чистим user_data
+    context.user_data.pop('last_meal_message_id', None)
+    context.user_data.pop('pending_meal', None)
+
     return ConversationHandler.END
 
 # --- Статистика ---
@@ -1290,34 +1313,47 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def show_last_7_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    meals = get_meals_last_7_days(user_id)
-    logger.info(f"User {user_id} requested last 7 days menu")
+    try:
+        query = update.callback_query
+        await query.answer()
+        user_id = update.effective_user.id
+        meals = get_meals_last_7_days(user_id)
+        logger.info(f"User {user_id} requested last 7 days menu")
 
-    if not meals:
-        logger.info(f"User {user_id} has no meals for last 7 days")
-        await query.message.reply_text("За последние 7 дней приёмы пищи не добавлены.", reply_markup=get_main_menu())
-        return
+        if not meals:
+            logger.info(f"User {user_id} has no meals for last 7 days")
+            await query.message.reply_text(
+                "За последние 7 дней приёмы пищи не добавлены.", 
+                reply_markup=get_main_menu()
+            )
+            return
 
-    daily_meals = defaultdict(list)
-    total_per_day = defaultdict(float)
+        daily_meals = defaultdict(list)
+        total_per_day = defaultdict(float)
 
-    for meal in meals:
-        date_str = meal['timestamp'].split()[0]
-        date_friendly = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
-        daily_meals[date_friendly].append(f"🔹 {meal['food_text']} — {meal['calories']} ккал")
-        total_per_day[date_friendly] += meal['calories']
+        for meal in meals:
+            date_str = meal['timestamp'].split()[0]
+            date_friendly = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
+            daily_meals[date_friendly].append(f"🔹 {meal['food_text']} — {meal['calories']} ккал")
+            total_per_day[date_friendly] += meal['calories']
 
-    message = "🗓 <b>Меню за последние 7 дней</b>:\n\n"
-    for date, items in daily_meals.items():
-        total = total_per_day[date]
-        message += f"📌<u><b>{date}</b> (всего: {total} ккал)</u>\n"
-        message += "\n".join(items)
-        message += "\n\n"
+        message = "🗓 <b>Меню за последние 7 дней</b>:\n\n"
+        for date, items in daily_meals.items():
+            total = total_per_day[date]
+            message += f"📌<u><b>{date}</b> (всего: {total} ккал)</u>\n"
+            message += "\n".join(items)
+            message += "\n\n"
 
-    await query.message.reply_text(message, parse_mode="HTML", reply_markup=get_main_menu())
+        await query.message.reply_text(message, parse_mode="HTML", reply_markup=get_main_menu())
+
+    except Exception as e:
+        user_id = update.effective_user.id if update.effective_user else "unknown"
+        logger.exception(f"Error in show_last_7_days for user {user_id}: {e}")
+        if update.callback_query:
+            await update.callback_query.message.reply_text(
+                "❌ Произошла ошибка при получении меню за последние 7 дней.",
+                reply_markup=get_main_menu()
+            )
 
 async def clear_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1814,6 +1850,8 @@ profile_handler = MessageHandler(filters.Regex("^👤 Профиль$"), profile
 stats_handler = MessageHandler(filters.Regex("^📊 Статистика$"), stats)
 settings_handler = MessageHandler(filters.Regex("^⚙️ Настройки"), settings_menu)
 
+# Обработчик генерации меню
+
 generate_menu_conv = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex("^📝 Создать меню$"), start_generate_menu)],
     states={
@@ -1828,14 +1866,20 @@ generate_menu_conv = ConversationHandler(
     per_chat=True
 )
 
+# Обработчик ввода еды
 
 meal_conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex("^🍜 Добавить еду$"), add_meal_start)],
     states={
-        ADD_MEAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_food_input), MessageHandler(filters.VOICE, add_food_voice),],
+        ADD_MEAL: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_food_input),
+            MessageHandler(filters.VOICE, add_food_voice),
+            CallbackQueryHandler(cancel_meal, pattern="^cancel_meal$"),
+        ],
         AWAIT_CONFIRM: [
             CallbackQueryHandler(confirm_meal, pattern="^confirm_meal$"),
-            CallbackQueryHandler(retry_meal, pattern="^retry_meal$")
+            CallbackQueryHandler(retry_meal, pattern="^retry_meal$"),
+            CallbackQueryHandler(cancel_meal, pattern="^cancel_meal$"),
         ]
     },
     fallbacks=[CommandHandler('cancel', cancel_meal)],
