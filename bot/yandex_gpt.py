@@ -122,42 +122,20 @@ async def analyze_menu_with_gpt(
     api_key: str,
     folder_id: str
 ) -> dict:
-    import aiohttp, json, re, logging
-    logger = logging.getLogger(__name__)
 
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     headers = {"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json"}
 
-    # Распределение калорий
-    percents_map = {
-        1: [100],
-        2: [45, 55],
-        3: [25, 45, 30],
-        4: [25, 10, 40, 25],
-        5: [20, 8, 40, 8, 24]
-    }
+    percents_map = {1:[100],2:[45,55],3:[25,45,30],4:[25,10,40,25],5:[20,8,40,8,24]}
     percents = percents_map.get(meals_per_day, percents_map[3])
 
-    # Названия приёмов
-    names_map = {
-        1: ["Приём 1"],
-        2: ["Приём 1", "Приём 2"],
-        3: ["Завтрак", "Обед", "Ужин"],
-        4: ["Завтрак", "Перекус 1", "Обед", "Ужин"],
-        5: ["Завтрак", "Перекус 1", "Обед", "Перекус 2", "Ужин"]
-    }
+    names_map = {1:["Приём 1"],2:["Приём 1","Приём 2"],3:["Завтрак","Обед","Ужин"],
+                 4:["Завтрак","Перекус 1","Обед","Ужин"],5:["Завтрак","Перекус 1","Обед","Перекус 2","Ужин"]}
     meal_names = names_map.get(meals_per_day, names_map[3])
 
-    # Целевые калории по каждому приёму
-    meal_targets = [
-        {"name": n, "target_calories": int(round(daily_calories * p / 100))}
-        for n, p in zip(meal_names, percents)
-    ]
-
-    # Базовый JSON-скелет для промпта
+    meal_targets = [{"name": n, "target_calories": int(round(daily_calories*p/100))} for n,p in zip(meal_names, percents)]
     meal_names_json = ", ".join([f'{{"name": "{n}", "items": []}}' for n in meal_names])
 
-    # 🔥 Новый строгий промпт
     prompt = f"""
 Составь меню на один день ({meals_per_day} приёмов пищи) для цели: "{user_goal}".
 Дневная цель (КБЖУ):
@@ -193,87 +171,91 @@ async def analyze_menu_with_gpt(
 }}
 """
 
-    payload = {
-        "modelUri": f"gpt://{folder_id}/yandexgpt/rc",
-        "completionOptions": {"temperature": 0.7, "maxTokens": 1400},
-        "messages": [{"role": "user", "text": prompt}]
-    }
+    payload = {"modelUri": f"gpt://{folder_id}/yandexgpt/rc",
+               "completionOptions": {"temperature": 0.4, "maxTokens": 2000},
+               "messages": [{"role": "user", "text": prompt}]}
 
-    # --- Вспомогательные функции ---
-    async def send_request(pl):
+    async def send_request(pl, note=""):
+        logger.info(f"Отправка запроса к GPT {note}...")
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=pl, headers=headers, timeout=60) as resp:
                 txt = await resp.text()
                 if resp.status != 200:
+                    logger.error(f"GPT error {resp.status}: {txt}")
                     raise RuntimeError(f"GPT error {resp.status}: {txt}")
                 js = await resp.json()
                 try:
-                    return js["result"]["alternatives"][0]["message"]["text"]
+                    result_txt = js["result"]["alternatives"][0]["message"]["text"]
                 except Exception:
-                    return txt
+                    result_txt = txt
+                logger.info(f"Получен ответ от GPT ({note}), длина текста: {len(result_txt)}")
+                return result_txt
 
     def extract_json_substring(text: str):
         text = re.sub(r"^```[\w]*\n", "", text)
         text = re.sub(r"\n```$", "", text)
         match = re.search(r'(\{.*\}|\[.*\])', text, flags=re.S)
-        if not match:
-            raise ValueError("JSON not found")
+        if not match: raise ValueError("JSON not found")
         return match.group(0)
 
     def parse_num(v):
-        if isinstance(v, (int, float)):
-            return float(v)
-        m = re.search(r"[-+]?\d+(?:[.,]\d+)?", str(v))
+        if isinstance(v,(int,float)): return float(v)
+        m=re.search(r"[-+]?\d+(?:[.,]\d+)?",str(v))
         return float(m.group(0).replace(",", ".")) if m else 0.0
 
     def recompute(md: dict):
-        totals = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
-        for meal in md.get("meals", []):
-            cal = prot = fat = ch = 0
-            for it in meal.get("items", []):
-                cal += parse_num(it.get("calories"))
-                prot += parse_num(it.get("protein"))
-                fat += parse_num(it.get("fat"))
-                ch += parse_num(it.get("carbs"))
-            meal["calories"] = int(round(cal))
-            meal["protein"] = round(prot, 1)
-            meal["fat"] = round(fat, 1)
-            meal["carbs"] = round(ch, 1)
-            totals["calories"] += cal
-            totals["protein"] += prot
-            totals["fat"] += fat
-            totals["carbs"] += ch
-        md["totals"] = {
-            "calories": int(round(totals["calories"])),
-            "protein": round(totals["protein"], 1),
-            "fat": round(totals["fat"], 1),
-            "carbs": round(totals["carbs"], 1),
-        }
+        totals={"calories":0,"protein":0,"fat":0,"carbs":0}
+        for meal in md.get("meals",[]):
+            cal=prot=fat=ch=0
+            for it in meal.get("items",[]):
+                cal+=parse_num(it.get("calories"))
+                prot+=parse_num(it.get("protein"))
+                fat+=parse_num(it.get("fat"))
+                ch+=parse_num(it.get("carbs"))
+            meal["calories"]=int(round(cal))
+            meal["protein"]=round(prot,1)
+            meal["fat"]=round(fat,1)
+            meal["carbs"]=round(ch,1)
+            totals["calories"]+=cal
+            totals["protein"]+=prot
+            totals["fat"]+=fat
+            totals["carbs"]+=ch
+        md["totals"]={"calories":int(round(totals["calories"])),
+                      "protein":round(totals["protein"],1),
+                      "fat":round(totals["fat"],1),
+                      "carbs":round(totals["carbs"],1)}
         return md
 
-    # --- Первый запрос ---
-    raw = await send_request(payload)
+    # Первый запрос
+    raw = await send_request(payload, note="первый запрос")
     menu = json.loads(extract_json_substring(raw))
     menu = recompute(menu)
-
-    # --- Финальная нормализация ---
     total_cal = menu["totals"]["calories"]
-    if total_cal > daily_calories:
-        # Скейлим вниз
-        scale = daily_calories / total_cal
+    logger.info(f"Итог после первого запроса: {total_cal} ккал")
+
+    # Скейлинг вниз
+    if total_cal>daily_calories:
+        logger.info(f"Скейлим калории вниз: {total_cal} -> {daily_calories}")
+        scale=daily_calories/total_cal
         for meal in menu["meals"]:
             for it in meal["items"]:
-                for k in ("calories", "protein", "fat", "carbs"):
-                    it[k] = int(it[k]*scale) if k=="calories" else round(it[k]*scale, 1)
-        menu = recompute(menu)
+                for k in ("calories","protein","fat","carbs"):
+                    it[k]=int(it[k]*scale) if k=="calories" else round(it[k]*scale,1)
+        menu=recompute(menu)
+        logger.info(f"Итог после скейлинга: {menu['totals']['calories']} ккал")
 
-    elif total_cal < daily_calories*0.95:
-        # Один ретрай: просим увеличить
-        retry_prompt = prompt + f"\n\nВ предыдущем варианте было {total_cal} ккал. Увеличь порции/блюда так, чтобы получилось {int(daily_calories*0.95)}–{int(daily_calories)} ккал."
-        payload["messages"] = [{"role": "user", "text": retry_prompt}]
-        raw2 = await send_request(payload)
-        menu2 = recompute(json.loads(extract_json_substring(raw2)))
-        if abs(daily_calories - menu2["totals"]["calories"]) < abs(daily_calories - total_cal):
-            menu = menu2
+    # Ретрай для увеличения
+    elif total_cal<daily_calories*0.95:
+        logger.info(f"Калорий меньше 95% нормы ({total_cal} < {daily_calories*0.95}), делаем ретрай")
+        retry_prompt = prompt + f"\n\nВ предыдущем варианте было {total_cal} ккал. Увеличь порции/блюда до {int(daily_calories*0.95)}–{int(daily_calories)} ккал."
+        payload["messages"]=[{"role":"user","text":retry_prompt}]
+        raw2=await send_request(payload, note="ретрай для увеличения")
+        menu2=recompute(json.loads(extract_json_substring(raw2)))
+        if abs(daily_calories-menu2["totals"]["calories"])<abs(daily_calories-total_cal):
+            menu=menu2
+            logger.info(f"Ретрай улучшил калории: {menu['totals']['calories']} ккал")
+        else:
+            logger.info("Ретрай не улучшил результат, оставляем первый вариант")
 
+    logger.info(f"Финальный результат: {menu['totals']['calories']} ккал")
     return menu
