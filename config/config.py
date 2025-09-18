@@ -17,6 +17,6 @@ YANDEX_SPEECH_API_KEY = os.getenv("YANDEX_SPEECH_API_KEY")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # RateLimiter Config
-MAX_REQUESTS_PER_MINUTE = 3      # <-- 3 запроса в минуту на пользователя
+MAX_REQUESTS_PER_MINUTE = 2      # <-- 3 запроса в минуту на пользователя
 WINDOW_SECONDS = 60              # окно в секундах для подсчёта
 CONCURRENT_GPT = 10              # <-- глобальный лимит одновременных запросов к GPT
