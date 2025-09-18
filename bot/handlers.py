@@ -171,8 +171,8 @@ async def gender_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {user_id} selected gender: {query.data}")
 
     keyboard = [
-        [InlineKeyboardButton("Нет активности (сидячий образ жизни)", callback_data='none')],
-        [InlineKeyboardButton("Минимальная (работа на ногах)", callback_data='low')],
+        [InlineKeyboardButton("Нет активности (сидячая работа)", callback_data='none')],
+        [InlineKeyboardButton("Минимальная (активная работа)", callback_data='low')],
         [InlineKeyboardButton("Средняя (1-3 тренировки в неделю)", callback_data='medium')],
         [InlineKeyboardButton("Высокая (3-5 тренировок в неделю)", callback_data='high')]
     ]
@@ -1071,8 +1071,8 @@ async def process_food_text(update, context, food_text: str):
         warning_text = f"\n⚠️ <b>Внимание:</b> После добавления норма будет превышена на <b>{excess:.0f} ккал</b>!\n"
 
     product_list = "\n".join(
-        [f"🔹 {i['product']} — {i['quantity']} — {i.get('calories') or 0} ккал, "
-         f"Б: {i.get('protein') or 0} г, Ж: {i.get('fat') or 0} г, У: {i.get('carbs') or 0} г" for i in items]
+        [f"▸ {i['product']} - {i['quantity']} - {i.get('calories') or 0} ккал, "
+         f"(Б: {i.get('protein') or 0}г, Ж: {i.get('fat') or 0}г, У: {i.get('carbs') or 0}г)" for i in items]
     )
 
     summary = f"""
@@ -1087,13 +1087,10 @@ async def process_food_text(update, context, food_text: str):
 <b>📊 Норма после добавления:</b>
 {progress_after}
 {warning_text}
-{disclaimer_text}
     """
 
     keyboard = [
-        [InlineKeyboardButton("✅ Подтвердить", callback_data="confirm_meal")],
-        [InlineKeyboardButton("🔁 Ввести заново", callback_data="retry_meal")],
-        [InlineKeyboardButton("↩️ Отменить ввод", callback_data="cancel_meal")]
+        [InlineKeyboardButton("✅ Ввод", callback_data="confirm_meal"), InlineKeyboardButton("🔁 Повтор", callback_data="retry_meal"), InlineKeyboardButton("↩️ Отмена", callback_data="cancel_meal")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
