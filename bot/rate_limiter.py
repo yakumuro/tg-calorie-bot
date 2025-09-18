@@ -1,9 +1,10 @@
-# bot/rate_limiter.py
 import asyncio
 import time
 from collections import deque
 from typing import Callable, Any, Dict, Deque, Coroutine
 from config.config import MAX_REQUESTS_PER_MINUTE, WINDOW_SECONDS, CONCURRENT_GPT
+from datetime import datetime, timedelta
+from bot.database import get_db_connection
 
 from logger_config import logger
 
@@ -95,3 +96,39 @@ async def call_gpt_with_limits(user_id: int, gpt_async_fn: Callable[..., Corouti
         await _rollback_last_request(user_id)
         logger.exception(f"Error during GPT call for user {user_id}: {e}")
         raise
+
+class RateLimitExceededMenu(Exception):
+    def __init__(self, retry_after_seconds: int):
+        self.retry_after = retry_after_seconds
+        super().__init__(f"Menu request rate limit exceeded, retry after {retry_after_seconds}s")
+
+
+def check_menu_rate_limit(user_id: int, hours: int = 6):
+    """Проверяет, можно ли сгенерировать меню. Если нельзя — бросает RateLimitExceededMenu"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT last_menu_request FROM users WHERE user_id = ?
+    """, (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    now = datetime.now()
+    if row and row[0]:
+        last_request = datetime.fromisoformat(row[0])
+        delta = now - last_request
+        if delta < timedelta(hours=hours):
+            retry_after = int((timedelta(hours=hours) - delta).total_seconds())
+            logger.info(f"User {user_id} menu request blocked. Retry after {retry_after}s")
+            raise RateLimitExceededMenu(retry_after)
+
+
+def update_menu_request_time(user_id: int):
+    """Обновляет дату последнего запроса меню на текущий момент"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE users SET last_menu_request = ? WHERE user_id = ?
+    """, (datetime.now().isoformat(), user_id))
+    conn.commit()
+    conn.close()

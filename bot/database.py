@@ -30,7 +30,8 @@ def init_db():
             target_weight REAL,
             goal_rate TEXT,
             goal_start_date TEXT,
-            notifications_enabled INTEGER DEFAULT 1        
+            notifications_enabled INTEGER DEFAULT 1,
+            last_menu_request DATETIME        
         )
         ''')
 

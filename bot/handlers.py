@@ -5,10 +5,9 @@ from telegram.ext import (
 )
 from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days, set_notifications, get_notifications_status
 from bot.utils import calculate_daily_calories, get_main_menu, render_progress_bar, render_menu_to_image
-from bot.database import calculate_macros, delete_meals_for_day
-from bot.database import get_user_goal_info, update_goal_start_date, get_goal_start_date
+from bot.database import calculate_macros, delete_meals_for_day, get_user_goal_info, update_goal_start_date, get_goal_start_date
 from bot.yandex_gpt import analyze_food_with_gpt, analyze_menu_with_gpt
-from bot.rate_limiter import call_gpt_with_limits, RateLimitExceeded
+from bot.rate_limiter import call_gpt_with_limits, RateLimitExceeded, check_menu_rate_limit, update_menu_request_time, RateLimitExceededMenu
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
 from datetime import datetime
 from collections import defaultdict
@@ -17,6 +16,7 @@ from bot.yandex_speechkit import YandexSpeechToText
 import os
 from logger_config import logger
 import random
+
 
 stt = YandexSpeechToText()
 
@@ -41,6 +41,12 @@ ACTIVITY_LABELS = {
     'medium': 'Средняя',
     'high': 'Высокая'
 }
+
+disclaimer_text = (
+        "\n\nℹ️ Мы не врачи, все расчеты примерные. "
+        "Используйте бота как ориентир и прислушивайтесь к своему организму. "
+        "При любых сомнениях консультируйтесь со специалистом."
+    )
 
 MEAL_EXAMPLES = [
     "200 г куриной грудки, обжаренной на оливковом масле, с 50 г киноа и 100 г брокколи",
@@ -437,8 +443,8 @@ async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TY
                     goal_start_date=goal_start_date
                 )
                 await update.message.reply_text(
-                    f"✅ Вес обновлён!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
-                    f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+                    f"✅ <b>Вес обновлён!</b>\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
+                    f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
                     parse_mode="HTML", reply_markup=get_main_menu()
                 )
                 logger.info(f"User {user_id} обновил вес на {weight} кг, новая норма: {new_calories} ккал")
@@ -466,8 +472,8 @@ async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TY
                     goal_start_date=goal_start_date
                 )
                 await update.message.reply_text(
-                    f"✅ Рост обновлён!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
-                    f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+                    f"✅ <b>Рост обновлён!</b>\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
+                    f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
                     parse_mode="HTML", reply_markup=get_main_menu()
                 )
 
@@ -494,8 +500,8 @@ async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TY
                     goal_start_date=goal_start_date
                 )
                 await update.message.reply_text(
-                    f"✅ Возраст обновлён!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
-                    f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+                    f"✅ <b>Возраст обновлён!</b>\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
+                    f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
                     parse_mode="HTML", reply_markup=get_main_menu()
                 )
 
@@ -589,8 +595,8 @@ async def set_gender_male(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     await query.message.chat.send_message(
-        f"✅ Пол обновлён!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
-        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        f"✅ <b>Пол обновлён!</b>\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
         parse_mode="HTML", reply_markup=get_main_menu()
     )
 
@@ -631,8 +637,8 @@ async def set_gender_female(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     await query.message.chat.send_message(
-        f"✅ Пол обновлён!\nНовая норма: {new_calories} ккал\n"
-        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        f"✅ <b>Пол обновлён!</b>\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
         parse_mode="HTML", reply_markup=get_main_menu()
     )
 
@@ -672,8 +678,8 @@ async def set_activity_none(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     await query.message.chat.send_message(
-        f"✅ Активность обновлена!\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
-        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        f"✅ <b>Активность обновлена!</b>\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
         parse_mode="HTML", reply_markup=get_main_menu()
     )
 
@@ -712,8 +718,8 @@ async def set_activity_low(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     await query.message.chat.send_message(
-        f"✅ Активность обновлена!\nНовая норма: {new_calories} ккал\n"
-        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        f"✅ <b>Активность обновлена!</b>\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
         parse_mode="HTML", reply_markup=get_main_menu()
     )
 
@@ -752,8 +758,8 @@ async def set_activity_medium(update: Update, context: ContextTypes.DEFAULT_TYPE
         pass
     
     await query.message.chat.send_message(
-        f"✅ Активность обновлена!\nНовая норма: {new_calories} ккал\n"
-        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        f"✅ <b>Активность обновлена!</b>\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
         parse_mode="HTML", reply_markup=get_main_menu()
     )
 
@@ -793,8 +799,8 @@ async def set_activity_high(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     await query.message.chat.send_message(
-        f"✅ Активность обновлена!\nНовая норма: {new_calories} ккал\n"
-        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        f"✅ <b>Активность обновлена!</b>\n\n🎯 Новая норма калорий: {new_calories} ккал\n\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
         parse_mode="HTML", reply_markup=get_main_menu()
     )
 
@@ -834,9 +840,9 @@ async def set_goal_maintain(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     
     await query.message.chat.send_message(
-        f"✅ Цель обновлена на «Поддерживать»!\n"
-        f" Норма: {daily_calories} ккал\n"
-        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        f"✅ <b>Цель обновлена на «Поддерживать»!</b>\n\n"
+        f"🎯 Новая норма калорий: {daily_calories} ккал\n\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
         parse_mode="HTML",
         reply_markup=get_main_menu()
     )
@@ -938,11 +944,11 @@ async def set_goal_with_rate(update: Update, context: ContextTypes.DEFAULT_TYPE,
         pass
     
     await query.message.chat.send_message(
-        f"✅ Цель обновлена!\n\n"
+        f"✅ <b>Цель обновлена!</b>\n\n"
         f"🎯 {('Похудеть' if goal_type=='lose' else 'Набрать')} ({kg_per_week} кг/нед)\n"
         f"🎯 Целевой вес: {target_weight} кг\n"
-        f"🎯 Норма калорий с учётом цели: {daily_calories} ккал\n\n"
-        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+        f"🎯 Новая норма калорий: {daily_calories} ккал\n\n"
+        f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
         parse_mode="HTML",
         reply_markup=get_main_menu()
     )
@@ -974,12 +980,12 @@ async def process_food_text(update, context, food_text: str):
 
     try:
         await context.bot.send_chat_action(update.effective_chat.id, "typing")
-        if len(food_text) > 500:
+        if len(food_text) > 300:
             await update.message.reply_text(
-                "⚠️ Текст слишком длинный — максимум 500 символов. Сократи, пожалуйста, описание (укажи только порции и ингредиенты).",
+                "⚠️ Текст слишком длинный — максимум 300 символов. Сократи, пожалуйста, описание (укажи только порции и ингредиенты).",
                 reply_markup=get_main_menu()
             )
-            logger.error(f"Max 500 simbols")
+            logger.error(f"Max 300 simbols")
             return ADD_MEAL  # остаёмся в состоянии ввода пищи
 
         try:
@@ -1066,6 +1072,7 @@ async def process_food_text(update, context, food_text: str):
 <b>📊 Норма после добавления:</b>
 {progress_after}
 {warning_text}
+{disclaimer_text}
 
         """
 
@@ -1099,8 +1106,8 @@ async def add_food_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not voice:
         await update.message.reply_text("⚠️ Не удалось получить голосовое сообщение.")
         return ADD_MEAL
-    if voice.duration > 30:
-        await update.message.reply_text("⚠️ Голосовое сообщение слишком длинное (максимум 30 секунд). Попробуй записать короче.")
+    if voice.duration > 20:
+        await update.message.reply_text("⚠️ Голосовое сообщение слишком длинное (максимум 20 секунд). Попробуй записать короче.")
         return ADD_MEAL
 
     file = await context.bot.get_file(voice.file_id)
@@ -1262,6 +1269,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🥑Жиров:\n{progress_today_f}\n\n"
         f"🍞Углеводов:\n{progress_today_c}\n\n"
         f"{warning_text_today}"
+        f"{disclaimer_text}"
         )
 
     if img_buffer:
@@ -1466,7 +1474,7 @@ async def goal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ Готово!\n\n"
                 f"🎯 Твоя ежедневная норма (поддержание):\n"
                 f"<b>{daily_calories} ккал</b>\n"
-                f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+                f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
                 parse_mode="HTML",
                 reply_markup=get_main_menu()
             )
@@ -1614,7 +1622,7 @@ async def goal_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                    f"🎯 Целевой вес: {target_weight} кг\n"
                    f"🎯 Дата достижения: {goal_date_str}\n\n"
                    f"🎯 Норма с учётом цели: <b>{daily_calories} ккал</b>\n"
-                   f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+                   f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
             parse_mode="HTML",
             reply_markup=get_main_menu()
         )
@@ -1625,7 +1633,7 @@ async def goal_rate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🎯 Цель: {'Похудеть' if goal_type=='lose' else 'Набрать'} ({kg_per_week} кг/нед)\n"
             f"🎯 Целевой вес: {target_weight} кг\n\n"
             f"🎯 Норма с учётом цели: <b>{daily_calories} ккал</b>\n"
-            f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г",
+            f"🥩Б: {protein_norm} г, 🥑Ж: {fat_norm} г, 🍞У: {carbs_norm} г" + disclaimer_text,
             parse_mode="HTML",
             reply_markup=get_main_menu()
         )
@@ -1675,6 +1683,8 @@ async def toggle_notifications(update: Update, context: CallbackContext):
         ])
     )
 
+# Генерация меню
+
 async def start_generate_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # спрашиваем, сколько приёмов пищи — тот же UI, тот же flow
     user_id = update.effective_user.id
@@ -1707,25 +1717,36 @@ async def choose_meals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         meals_per_day = 3
     context.user_data["meals_per_day"] = meals_per_day
 
-    await query.edit_message_text(
-        "Опишите ваши ограничения или пожелания (максимум 250 символов).\n\n"
-        "Например:\n- аллергия на орехи\n- вегетарианская диета\n- предпочитаю рыбу\n"
+    text = (
+        "☝️ Опишите ваши ограничения или пожелания (максимум 100 символов).\n\n"
+        "Например:\n- аллергия на орехи\n- вегетарианская диета\n- предпочитаю рыбу" + disclaimer_text
     )
+
+    # Кнопка "Нет пожеланий"
+    keyboard = [[InlineKeyboardButton("Нет предпочтений или пожеланий", callback_data="no_prefs")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(text, reply_markup=reply_markup)
     return TYPING_PREFS
 
 
 async def typing_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prefs = (update.message.text or "").strip()
+    if update.callback_query:  # пришел callback от кнопки
+        prefs = "Нет конкретных предпочтений или пожеланий"
+        await update.callback_query.answer()
+    else:
+        prefs = (update.message.text or "").strip()
+
     user_id = update.effective_user.id
     logger.info(f"User {user_id} entered preferences (typing_prefs): {prefs[:200]}")
 
-    if len(prefs) > 250:
-        await update.message.reply_text("⚠️ Слишком длинное сообщение! Максимум 250 символов.")
+    if len(prefs) > 100:
+        await update.effective_message.reply_text("⚠️ Слишком длинное сообщение! Максимум 100 символов.")
         return TYPING_PREFS
 
     context.user_data["prefs"] = prefs
 
-    # получаем профиль пользователя
+    # Получаем профиль
     user_data = get_user(user_id)
     if not user_data:
         await update.message.reply_text("⚠️ Сначала укажите свои цели и КБЖУ в настройках профиля.")
@@ -1743,11 +1764,12 @@ async def typing_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_key = YANDEX_GPT_API_KEY
     folder_id = YANDEX_GPT_FOLDER_ID
 
-    # Сообщаем пользователю что идёт генерация и запускаем
-    await update.message.reply_text("Генерирую меню — скоро пришлю результат.")
-    logger.info(f"User {user_id}: sending GPT request (goal={goal}, meals_per_day={meals_per_day})")
-
     try:
+        check_menu_rate_limit(user_id)
+
+        await update.effective_message.reply_text("⏳ Генерирую меню — скоро пришлю результат.")
+        logger.info(f"User {user_id}: sending GPT request (goal={goal}, meals_per_day={meals_per_day})")
+
         menu_data = await analyze_menu_with_gpt(
             user_goal=goal,
             daily_calories=daily_calories,
@@ -1761,16 +1783,25 @@ async def typing_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         logger.info(f"User {user_id}: GPT menu received successfully")
 
+        update_menu_request_time(user_id)
+
         image_path = render_menu_to_image(menu_data, user_id)
         logger.info(f"User {user_id}: menu image rendered at {image_path}")
+        
+        today_tag = f"\n\n#Меню_за_{datetime.now():%Y%m%d}"
 
         with open(image_path, "rb") as img:
-            await update.message.reply_photo(img, caption="✅ Вот ваше меню на сегодня!")
+            await update.effective_message.reply_photo(img, caption=disclaimer_text + today_tag)
         logger.info(f"User {user_id}: menu image sent")
 
+    except RateLimitExceededMenu as e:
+        await update.effective_message.reply_text(
+            f"⏳ Слишком часто генерируете меню — попробуйте через {e.retry_after // 3600}ч {(e.retry_after % 3600)//60}м.",
+            reply_markup=get_main_menu()
+        )
     except Exception as e:
         logger.exception(f"User {user_id}: error generating menu - {e}")
-        await update.message.reply_text(f"❌ Ошибка генерации меню: {e}")
+        await update.effective_message.reply_text(f"❌ Ошибка генерации меню: {e}")
 
     return ConversationHandler.END
 
@@ -1784,7 +1815,10 @@ generate_menu_conv = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex("^📝 Создать меню$"), start_generate_menu)],
     states={
         CHOOSING_MEALS: [CallbackQueryHandler(choose_meals)],
-        TYPING_PREFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, typing_prefs)],
+        TYPING_PREFS: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, typing_prefs),
+            CallbackQueryHandler(typing_prefs, pattern="^no_prefs$")  # <-- добавлено
+        ],
     },
     fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
     per_user=True,
