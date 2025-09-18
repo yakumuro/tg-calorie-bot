@@ -41,7 +41,7 @@ async def analyze_food_with_gpt(food_text: str, api_key: str, folder_id: str) ->
 """
 
     payload = {
-        "modelUri": f"gpt://{folder_id}/yandexgpt-lite/latest",
+        "modelUri": f"gpt://{folder_id}/yandexgpt/rc",
         "completionOptions": {"temperature": 0.3, "maxTokens": "500"},
         "messages": [{"role": "user", "text": prompt}]
     }
