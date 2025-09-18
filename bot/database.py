@@ -49,6 +49,17 @@ def init_db():
             )
         ''')
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS meal_reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                meal_index INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                time TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users (user_id)
+            )
+        ''')
+
         conn.commit()
 
         # Миграция: если таблица users была старой — добавим колонки (без потери данных)
@@ -359,3 +370,35 @@ def get_notifications_status(user_id: int) -> bool:
     row = cursor.fetchone()
     conn.close()
     return bool(row[0]) if row else True  # по умолчанию True
+
+
+# Получить расписание пользователя
+def get_meal_reminders(user_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT meal_index, name, time
+        FROM meal_reminders
+        WHERE user_id = ?
+        ORDER BY meal_index
+    """, (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"index": r["meal_index"], "name": r["name"], "time": r["time"]} for r in rows]
+
+# Удалить расписание
+def clear_meal_reminders(user_id: int):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM meal_reminders WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+# Добавить один приём пищи
+def add_meal_reminder(user_id: int, meal_index: int, name: str, time_str: str):
+    conn = get_db_connection()
+    conn.execute(
+        "INSERT INTO meal_reminders (user_id, meal_index, name, time) VALUES (?, ?, ?, ?)",
+        (user_id, meal_index, name, time_str)
+    )
+    conn.commit()
+    conn.close()

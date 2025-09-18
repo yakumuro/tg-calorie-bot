@@ -46,4 +46,40 @@ def setup_scheduler(application):
         send_reminder,
         time=time(hour=10, minute=00, tzinfo=moscow_tz)
     )
+    # Каждую минуту проверяем напоминания по расписанию
+    application.job_queue.run_repeating(send_meal_reminders, interval=60, first=0)
     logger.info("Reminder scheduler started (daily at 10:00 MSK)")
+    logger.info("Notofication scheduler started (every 60 sek)")
+
+async def send_meal_reminders(context):
+    application = context.application
+    moscow_tz = pytz.timezone("Europe/Moscow")
+    now = datetime.now(moscow_tz).strftime("%H:%M")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT u.user_id, u.notifications_enabled, m.name
+        FROM users u
+        JOIN meal_reminders m ON u.user_id = m.user_id
+        WHERE m.time = ?
+    """, (now,))
+    reminders = cursor.fetchall()
+    conn.close()
+
+    for r in reminders:
+        user_id, notifications_enabled, meal_name = r
+
+        # защита — проверяем включены ли уведомления
+        if not notifications_enabled:
+            logger.debug(f"Skip reminder for user {user_id}: notifications disabled")
+            continue
+
+        try:
+            await application.bot.send_message(
+                user_id,
+                f"🔔 {meal_name}\n\nНапоминаю о необходимости внести данные о приёме пищи."
+            )
+            logger.info(f"Sent meal reminder to user {user_id} ({meal_name})")
+        except Exception as e:
+            logger.error(f"Error sending meal reminder to {user_id}: {e}")

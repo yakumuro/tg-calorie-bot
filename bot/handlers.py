@@ -3,9 +3,9 @@ from telegram.ext import (
     CommandHandler, MessageHandler, CallbackQueryHandler,
     ConversationHandler, ContextTypes, filters, CallbackContext
 )
-from bot.database import add_user, get_user, add_meal, get_stats, get_meals_last_7_days, set_notifications, get_notifications_status
+from bot.database import get_db_connection, add_user, get_user, add_meal, get_stats, get_meals_last_7_days, set_notifications, get_notifications_status
 from bot.utils import calculate_daily_calories, get_main_menu, render_progress_bar, render_menu_to_image
-from bot.database import calculate_macros, delete_meals_for_day, get_user_goal_info, update_goal_start_date, get_goal_start_date
+from bot.database import calculate_macros, delete_meals_for_day, get_user_goal_info, update_goal_start_date, get_goal_start_date, add_meal_reminder, clear_meal_reminders, get_meal_reminders
 from bot.yandex_gpt import analyze_food_with_gpt, analyze_menu_with_gpt
 from bot.rate_limiter import call_gpt_with_limits, RateLimitExceeded, check_menu_rate_limit, update_menu_request_time, RateLimitExceededMenu
 from config.config import YANDEX_GPT_API_KEY, YANDEX_GPT_FOLDER_ID
@@ -16,6 +16,7 @@ from bot.yandex_speechkit import YandexSpeechToText
 import os
 from logger_config import logger
 import random
+from bot.reminder_scheduler import send_meal_reminders
 
 
 stt = YandexSpeechToText()
@@ -34,6 +35,9 @@ CHOOSING_MEALS, TYPING_PREFS = range(2)
 
 # Добавление еды
 ADD_MEAL, AWAIT_CONFIRM = range(15, 17)
+
+# Расписание уведомлений
+SET_REMINDER_COUNT, SET_MEAL_NAME, SET_MEAL_TIME = range(3)
 
 ACTIVITY_LABELS = {
     'none': 'Нет активности',
@@ -231,7 +235,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     gender_str = "Мужской" if gender == "male" else "Женский"
 
-    keyboard = [[InlineKeyboardButton("✏️ Редактировать", callback_data="edit_profile")]]
+    keyboard = [[InlineKeyboardButton("✏️ Редактировать профиль", callback_data="edit_profile")],
+                [InlineKeyboardButton("⏰ Расписание уведомлений", callback_data="meal_reminders")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     extra = ""
@@ -280,7 +285,7 @@ async def edit_name_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     context.user_data['editing_field'] = 'name'
-    await query.message.edit_text("Введите новое имя:", reply_markup=None)
+    await query.message.edit_text("Введи новое имя:", reply_markup=None)
     logger.info(f"User {user_id} editing field: name")
 
 async def edit_weight_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -288,7 +293,7 @@ async def edit_weight_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     context.user_data['editing_field'] = 'weight'
-    await query.message.edit_text("Введите новый вес (кг):", reply_markup=None)
+    await query.message.edit_text("Введи новый вес (кг):", reply_markup=None)
     logger.info(f"User {user_id} editing field: weight")
 
 async def edit_height_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -296,7 +301,7 @@ async def edit_height_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     context.user_data['editing_field'] = 'height'
-    await query.message.edit_text("Введите новый рост (см):", reply_markup=None)
+    await query.message.edit_text("Введи новый рост (см):", reply_markup=None)
     logger.info(f"User {user_id} editing field: height")
 
 async def edit_age_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -304,7 +309,7 @@ async def edit_age_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data['editing_field'] = 'age'
-    await query.message.edit_text("Введите новый возраст:", reply_markup=None)
+    await query.message.edit_text("Введи новый возраст:", reply_markup=None)
     logger.info(f"User {user_id} editing field: age")
 
 async def edit_gender_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -510,7 +515,7 @@ async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TY
 
         except ValueError:
             logger.warning(f"User {user_id} ввёл некорректное число для поля {field}: {text}")
-            await update.message.reply_text("Введите корректное число:")
+            await update.message.reply_text("Введи корректное число:")
             return
 
         # Очищаем состояние редактирования
@@ -527,7 +532,7 @@ async def handle_all_text_input(update: Update, context: ContextTypes.DEFAULT_TY
                 raise ValueError
         except ValueError:
             logger.warning(f"User {user_id} ввёл некорректное число для поля {field}: {text}")
-            await update.message.reply_text("Введите корректный вес числом (например, 70.0):")
+            await update.message.reply_text("Введи корректный вес числом (например, 70.0):")
             return
 
         current_weight = user["weight"]
@@ -865,7 +870,7 @@ async def set_goal_lose(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning(f"Failed to delete message when entering target weight for user {user_id}: {e}")
         pass
     
-    await query.message.chat.send_message("Введите целевой вес (в кг):", reply_markup=None)
+    await query.message.chat.send_message("Введи целевой вес (в кг):", reply_markup=None)
 
 async def set_goal_gain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -882,7 +887,7 @@ async def set_goal_gain(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning(f"Failed to delete message when entering target weight for user {user_id}: {e}")
         pass
     
-    await query.message.chat.send_message("Введите целевой вес (в кг):", reply_markup=None)
+    await query.message.chat.send_message("Введи целевой вес (в кг):", reply_markup=None)
 
 
 # Обработчики для выбора темпа
@@ -1292,7 +1297,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🥑Жиров:\n{progress_today_f}\n\n"
         f"🍞Углеводов:\n{progress_today_c}\n\n"
         f"{warning_text_today}"
-        f"{disclaimer_text}"
         )
 
     if img_buffer:
@@ -1521,7 +1525,7 @@ async def goal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
 
     # Если цель похудеть или набрать — запрашиваем целевой вес
-    await query.message.reply_text("Введите целевой вес (в кг, например 70.0):", reply_markup=None)
+    await query.message.reply_text("Введи целевой вес (в кг, например 70.0):", reply_markup=None)
     return TARGET_WEIGHT
 
 async def target_weight_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1541,10 +1545,10 @@ async def target_weight_handler(update: Update, context: ContextTypes.DEFAULT_TY
     goal = context.user_data.get('goal')
     current_weight = context.user_data.get('weight')
     if goal == "lose" and not (target < current_weight):
-        await update.message.reply_text("Целевой вес должен быть меньше текущего. Введите корректный целевой вес:")
+        await update.message.reply_text("Целевой вес должен быть меньше текущего. Введи корректный целевой вес:")
         return TARGET_WEIGHT
     if goal == "gain" and not (target > current_weight):
-        await update.message.reply_text("Целевой вес должен быть больше текущего. Введите корректный целевой вес:")
+        await update.message.reply_text("Целевой вес должен быть больше текущего. Введи корректный целевой вес:")
         return TARGET_WEIGHT
 
     context.user_data['target_weight'] = target
@@ -1842,11 +1846,299 @@ async def typing_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+# Расписание уведомлений
+
+# ---- Вспомогательные утилиты ----
+async def _safe_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, why: str = ""):
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logger.debug(f"Deleted message {message_id} in chat {chat_id}. {why}")
+    except Exception as e:
+        logger.debug(f"Can't delete message {message_id} in chat {chat_id}: {e}. {why}")
+
+def _store_last_msg_id(context: ContextTypes.DEFAULT_TYPE, msg):
+    if not msg:
+        return
+    context.user_data['last_reminder_message_id'] = msg.message_id
+    context.user_data['last_reminder_chat_id'] = msg.chat_id
+    logger.debug(f"Stored last_reminder_message_id={msg.message_id} chat={msg.chat_id}")
+
+async def _delete_last_bot_msg_if_any(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    last_id = context.user_data.get('last_reminder_message_id')
+    chat_id = context.user_data.get('last_reminder_chat_id') or (update.effective_chat.id if update.effective_chat else None)
+    if last_id and chat_id:
+        await _safe_delete_message(context, chat_id, last_id, why="cleanup before next prompt")
+    context.user_data.pop('last_reminder_message_id', None)
+    context.user_data.pop('last_reminder_chat_id', None)
+
+# ---- Хендлеры ----
+
+# Показываем текущее расписание (вызов через callback 'meal_reminders')
+async def meal_reminders_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    logger.info(f"User {user_id} opened meal reminders menu")
+
+    # удаляем старое сообщение бота, если есть (чтобы не захламлять)
+    try:
+        await _delete_last_bot_msg_if_any(update, context)
+    except Exception as e:
+        logger.debug(f"Failed to cleanup last reminder message: {e}")
+
+    # проверяем включены ли уведомления
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT notifications_enabled FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row or row[0] == 0:
+        # уведомления выключены
+        text = (
+            "🔕 У вас отключены уведомления.\n\n"
+            "Чтобы пользоваться расписанием, включите их в ⚙ Настройках."
+        )
+        sent = await query.message.reply_text(text)
+        _store_last_msg_id(context, sent)
+        logger.info(f"User {user_id} tried to open reminders menu but notifications disabled")
+        return
+
+    # если уведомления включены — показываем расписание
+    reminders = get_meal_reminders(user_id)
+    if not reminders:
+        text = "У вас пока нет расписания уведомлений о приёме пищи."
+        keyboard = [[InlineKeyboardButton("➕ Добавить расписание", callback_data="add_reminders")]]
+    else:
+        text = "<b>Ваше расписание уведомлений:</b>\n\n"
+        for r in reminders:
+            text += f"🔹 {r['name']} — {r['time']} по МСК\n"
+        keyboard = [[InlineKeyboardButton("✏️ Изменить расписание", callback_data="add_reminders")]]
+
+    sent = await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    _store_last_msg_id(context, sent)
+    logger.info(f"User {user_id} reminder menu sent (count={len(reminders)})")
+
+
+# Шаг 1: пользователь нажал "Добавить/Изменить" -> выбираем количество напоминаний
+async def add_reminders_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    logger.info(f"User {user_id} clicked add_reminders")
+
+    # удаляем старое бот-сообщение
+    try:
+        await _delete_last_bot_msg_if_any(update, context)
+    except Exception as e:
+        logger.debug(f"Failed cleanup before add_reminders_start: {e}")
+
+    keyboard = [
+        [InlineKeyboardButton("1", callback_data="reminders_count_1")],
+        [InlineKeyboardButton("2", callback_data="reminders_count_2")],
+        [InlineKeyboardButton("3", callback_data="reminders_count_3")],
+    ]
+    sent = await query.message.reply_text("Сколько напоминаний о приёмах пищи в день вам нужно?", reply_markup=InlineKeyboardMarkup(keyboard))
+    _store_last_msg_id(context, sent)
+    logger.info(f"User {user_id} asked for reminders count selection")
+    return SET_REMINDER_COUNT
+
+
+# Шаг 2: пользователь выбрал количество (callback)
+async def set_reminders_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    # parse count (последний символ в callback_data)
+    try:
+        count = int(query.data.split("_")[-1])
+    except Exception:
+        count = 1
+    context.user_data['reminder_count'] = count
+    context.user_data['current_meal_index'] = 1
+    logger.info(f"User {user_id} selected reminder_count={count}")
+
+    # очистим старые напоминания и удалим меню выбора
+    try:
+        clear_meal_reminders(user_id)
+        logger.debug(f"Cleared existing reminders for user {user_id}")
+    except Exception as e:
+        logger.error(f"Error clearing reminders for user {user_id}: {e}")
+
+    # удаляем сообщение с кнопками выбора количества
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logger.debug(f"Can't delete count-selection message: {e}")
+
+    # Просим ввести название первого приема
+    chat_id = query.from_user.id
+    sent = await context.bot.send_message(chat_id=chat_id, text="Введи название для приёма пищи №1 (максимум 15 символов):")
+    _store_last_msg_id(context, sent)
+    logger.info(f"User {user_id} prompted to enter name for meal #1")
+    return SET_MEAL_NAME
+
+
+# Шаг 3: вводим название приема (Message)
+async def set_meal_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = (update.message.text or "").strip()[:15]
+    if not text:
+        logger.info(f"User {user_id} submitted empty meal name")
+        await update.message.reply_text("Название не может быть пустым. Введите название (максимум 15 символов):")
+        return SET_MEAL_NAME
+
+    context.user_data.setdefault('meal_names', []).append(text)
+    logger.info(f"User {user_id} entered meal name #{len(context.user_data['meal_names'])}: '{text}'")
+
+    # удаляем бот-прошлый prompt и сам пользовательский ввод, чтобы не захламлять чат
+    try:
+        await _delete_last_bot_msg_if_any(update, context)
+    except Exception as e:
+        logger.debug(f"Failed to delete last bot message after name input: {e}")
+    try:
+        await update.message.delete()
+    except Exception as e:
+        logger.debug(f"Failed to delete user's name message: {e}")
+
+    # Просим ввести время для этого приема
+    chat_id = update.effective_chat.id
+    sent = await context.bot.send_message(chat_id=chat_id, text=f"Введите время для '{text}' в формате ЧЧ:ММ по МСК:")
+    _store_last_msg_id(context, sent)
+    logger.info(f"User {user_id} prompted to enter time for meal '{text}'")
+    return SET_MEAL_TIME
+
+
+# Шаг 4: вводим время приема (Message)
+async def set_meal_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    time_text = (update.message.text or "").strip()
+    logger.info(f"User {user_id} entered time text: {time_text}")
+
+    # Валидация формата
+    try:
+        datetime.strptime(time_text, "%H:%M")
+    except ValueError:
+        logger.info(f"User {user_id} provided invalid time format: {time_text}")
+        await update.message.reply_text("❌ Неверный формат времени. Введите ЧЧ:ММ по МСК:")
+        return SET_MEAL_TIME
+
+    idx = context.user_data.get('current_meal_index', 1)
+    name = context.user_data.get('meal_names', [])[idx - 1]
+    try:
+        add_meal_reminder(user_id, idx, name, time_text)
+        logger.info(f"Saved reminder for user {user_id}: #{idx} '{name}' @ {time_text}")
+    except Exception as e:
+        logger.error(f"Error saving reminder for user {user_id}: {e}")
+
+    # удаляем бот-прошлый prompt и сам пользовательский ввод
+    try:
+        await _delete_last_bot_msg_if_any(update, context)
+    except Exception as e:
+        logger.debug(f"Failed to delete last bot message after time input: {e}")
+    try:
+        await update.message.delete()
+    except Exception as e:
+        logger.debug(f"Failed to delete user's time message: {e}")
+
+    # продолжаем либо запрашиваем следующий name, либо завершаем
+    if context.user_data.get('current_meal_index', 1) < context.user_data.get('reminder_count', 1):
+        context.user_data['current_meal_index'] += 1
+        nxt = context.user_data['current_meal_index']
+        chat_id = update.effective_chat.id
+        sent = await context.bot.send_message(chat_id=chat_id, text=f"Введите название для приёма пищи №{nxt} (максимум 50 символов):")
+        _store_last_msg_id(context, sent)
+        logger.info(f"User {user_id} prompted to enter name for meal #{nxt}")
+        return SET_MEAL_NAME
+    else:
+        # все введено — показываем сохранённое расписание
+        reminders = get_meal_reminders(user_id)
+        text = "<b>Расписание уведомлений сохранено:</b>\n\n"
+        for r in reminders:
+            text += f"🔹 {r['name']} — {r['time']} по МСК\n"
+
+        chat_id = update.effective_chat.id
+        sent = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        _store_last_msg_id(context, sent)
+        logger.info(f"User {user_id} finished reminders setup (count={len(reminders)})")
+
+        # чистим временные данные
+        context.user_data.pop('meal_names', None)
+        context.user_data.pop('current_meal_index', None)
+        context.user_data.pop('reminder_count', None)
+        return ConversationHandler.END
+
+
+# Отмена ввода расписания (callback или текстовый)
+async def cancel_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # если колбэк — ответим и удалим его сообщение; если текст — удалим текст пользователя
+    if update.callback_query:
+        await update.callback_query.answer()
+        chat = update.callback_query.message.chat
+        user_id = update.callback_query.from_user.id
+        logger.info(f"User {user_id} cancelled reminders (callback)")
+    else:
+        chat = update.effective_chat
+        user_id = update.effective_user.id
+        logger.info(f"User {user_id} cancelled reminders (message)")
+
+    # удаляем последний бот-пост, если есть
+    try:
+        await _delete_last_bot_msg_if_any(update, context)
+    except Exception as e:
+        logger.debug(f"Failed to cleanup messages on cancel: {e}")
+
+    try:
+        await context.bot.send_message(chat_id=chat.id, text="✖️ Ввод отменён.", reply_markup=None)
+    except Exception as e:
+        logger.debug(f"Failed send cancel ack: {e}")
+
+    # очистка временных данных
+    context.user_data.pop('meal_names', None)
+    context.user_data.pop('current_meal_index', None)
+    context.user_data.pop('reminder_count', None)
+    context.user_data.pop('last_reminder_message_id', None)
+    context.user_data.pop('last_reminder_chat_id', None)
+
+    return ConversationHandler.END
+
 # --- Обработчики ---
 profile_handler = MessageHandler(filters.Regex("^👤 Профиль$"), profile)
 stats_handler = MessageHandler(filters.Regex("^📊 Статистика$"), stats)
 settings_handler = MessageHandler(filters.Regex("^⚙️ Настройки"), settings_menu)
 
+# Обработчик расписания уведомлений
+
+meal_reminders_conv = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(meal_reminders_menu, pattern="^meal_reminders$"),
+        CallbackQueryHandler(add_reminders_start, pattern="^add_reminders$")
+    ],
+    states={
+        SET_REMINDER_COUNT: [
+            CallbackQueryHandler(set_reminders_count, pattern="^reminders_count_[1-3]$"),
+            # универсальный обработчик: если кликнули что-то другое — выходим
+            CallbackQueryHandler(cancel_reminders, pattern=".*")
+        ],
+        SET_MEAL_NAME: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, set_meal_name),
+            CallbackQueryHandler(cancel_reminders, pattern=".*")
+        ],
+        SET_MEAL_TIME: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, set_meal_time),
+            CallbackQueryHandler(cancel_reminders, pattern=".*")
+        ],
+    },
+    fallbacks=[
+        CommandHandler('cancel', cancel_reminders),
+        CallbackQueryHandler(cancel_reminders, pattern="^cancel_reminders$"),
+        # универсальный fallback — завершает разговор на любой чужой кнопке
+        CallbackQueryHandler(cancel_reminders, pattern=".*")
+    ],
+    per_user=True,
+    per_chat=True
+)
 # Обработчик генерации меню
 
 generate_menu_conv = ConversationHandler(

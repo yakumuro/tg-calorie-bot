@@ -43,6 +43,7 @@ from bot.handlers import (
     toggle_notifications_handler,
     settings_handler,
     generate_menu_conv,
+    meal_reminders_conv,
 )
 
 
@@ -99,6 +100,7 @@ def main():
     app.add_handler(toggle_notifications_handler)
     app.add_handler(settings_handler)
     app.add_handler(generate_menu_conv)
+    app.add_handler(meal_reminders_conv)
 
     # 5. Обработчики графиков
     app.add_handler(CallbackQueryHandler(show_goal_chart, pattern="goal_chart"))
