@@ -1676,17 +1676,17 @@ async def toggle_notifications(update: Update, context: CallbackContext):
     )
 
 async def start_generate_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # спрашиваем, сколько приёмов пищи — тот же UI, тот же flow
     user_id = update.effective_user.id
-    logger.info(f"User {user_id} started menu generation")
-    
+    logger.info(f"User {user_id} started menu generation (start_generate_menu)")
+
     keyboard = [[InlineKeyboardButton(str(i), callback_data=f"meals_{i}") for i in range(1, 6)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await update.message.reply_text(
-        "🍽 Сколько приёмов пищи в день вы хотите в меню?\n\nВыберите один из вариантов:",
+        "Сколько приёмов пищи в день вы хотите в меню?\n\nВыберите один из вариантов:",
         reply_markup=reply_markup
     )
-    logger.debug("Sent meals selection keyboard")
     return CHOOSING_MEALS
 
 
@@ -1695,41 +1695,37 @@ async def choose_meals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
-    logger.info(f"User {user_id} selected callback: {data}")
+    logger.info(f"User {user_id} selected meals callback: {data}")
 
     if not data.startswith("meals_"):
         await query.edit_message_text("⚠️ Ошибка! Выберите количество приёмов пищи заново.")
-        logger.warning(f"User {user_id} sent invalid meals callback")
         return CHOOSING_MEALS
 
-    meals_per_day = int(data.split("_")[1])
+    try:
+        meals_per_day = int(data.split("_")[1])
+    except Exception:
+        meals_per_day = 3
     context.user_data["meals_per_day"] = meals_per_day
-    logger.info(f"User {user_id} chose {meals_per_day} meals per day")
 
     await query.edit_message_text(
-        "📝 Опишите ваши ограничения или пожелания.\n\n"
-        "Например:\n"
-        "- аллергия на орехи\n"
-        "- вегетарианская диета\n"
-        "- люблю больше рыбу\n\n"
-        "⚠️ Ограничение: максимум 250 символов."
+        "Опишите ваши ограничения или пожелания (максимум 250 символов).\n\n"
+        "Например:\n- аллергия на орехи\n- вегетарианская диета\n- предпочитаю рыбу\n"
     )
-    logger.debug("Prompted user for preferences/restrictions")
     return TYPING_PREFS
 
 
 async def typing_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prefs = update.message.text.strip()
+    prefs = (update.message.text or "").strip()
     user_id = update.effective_user.id
-    logger.info(f"User {user_id} entered preferences: {prefs[:100]}")
+    logger.info(f"User {user_id} entered preferences (typing_prefs): {prefs[:200]}")
 
     if len(prefs) > 250:
         await update.message.reply_text("⚠️ Слишком длинное сообщение! Максимум 250 символов.")
-        logger.warning(f"User {user_id} exceeded preferences length")
         return TYPING_PREFS
 
     context.user_data["prefs"] = prefs
 
+    # получаем профиль пользователя
     user_data = get_user(user_id)
     if not user_data:
         await update.message.reply_text("⚠️ Сначала укажите свои цели и КБЖУ в настройках профиля.")
@@ -1747,8 +1743,9 @@ async def typing_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_key = YANDEX_GPT_API_KEY
     folder_id = YANDEX_GPT_FOLDER_ID
 
-    await update.message.reply_text("⏳ Генерирую меню на сегодня, пожалуйста подождите...")
-    logger.info(f"User {user_id}: sending GPT request with goal={goal}, meals_per_day={meals_per_day}")
+    # Сообщаем пользователю что идёт генерация и запускаем
+    await update.message.reply_text("Генерирую меню — скоро пришлю результат.")
+    logger.info(f"User {user_id}: sending GPT request (goal={goal}, meals_per_day={meals_per_day})")
 
     try:
         menu_data = await analyze_menu_with_gpt(
@@ -1772,8 +1769,8 @@ async def typing_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"User {user_id}: menu image sent")
 
     except Exception as e:
+        logger.exception(f"User {user_id}: error generating menu - {e}")
         await update.message.reply_text(f"❌ Ошибка генерации меню: {e}")
-        logger.error(f"User {user_id}: error generating menu - {e}")
 
     return ConversationHandler.END
 

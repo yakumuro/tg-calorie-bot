@@ -110,12 +110,7 @@ async def analyze_food_with_gpt(food_text: str, api_key: str, folder_id: str) ->
         print(f"❌ Ошибка обработки ответа: {e}")
         raise
 
-import aiohttp
-import json
-import re
-from logger_config import logger
-
-# --- GPT запрос и анализ меню ---
+# --- GPT запрос и анализ меню (пересобранная версия) ---
 async def analyze_menu_with_gpt(
     user_goal: str,
     daily_calories: float,
@@ -127,97 +122,158 @@ async def analyze_menu_with_gpt(
     api_key: str,
     folder_id: str
 ) -> dict:
+    import aiohttp, json, re, logging
+    logger = logging.getLogger(__name__)
 
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-    headers = {
-        "Authorization": f"Api-Key {api_key}",
-        "Content-Type": "application/json"
+    headers = {"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json"}
+
+    # Распределение калорий
+    percents_map = {
+        1: [100],
+        2: [45, 55],
+        3: [25, 45, 30],
+        4: [25, 10, 40, 25],
+        5: [20, 8, 40, 8, 24]
     }
+    percents = percents_map.get(meals_per_day, percents_map[3])
 
-    # Формируем список названий приёмов пищи для промта
-    if meals_per_day == 1:
-        meal_names = ["Приём 1"]
-    elif meals_per_day == 2:
-        meal_names = ["Приём 1", "Приём 2"]
-    elif meals_per_day == 3:
-        meal_names = ["Завтрак", "Обед", "Ужин"]
-    elif meals_per_day == 4:
-        meal_names = ["Завтрак", "Перекус 1", "Обед", "Ужин"]
-    else:  # 5
-        meal_names = ["Завтрак", "Перекус 1", "Обед", "Перекус 2", "Ужин"]
+    # Названия приёмов
+    names_map = {
+        1: ["Приём 1"],
+        2: ["Приём 1", "Приём 2"],
+        3: ["Завтрак", "Обед", "Ужин"],
+        4: ["Завтрак", "Перекус 1", "Обед", "Ужин"],
+        5: ["Завтрак", "Перекус 1", "Обед", "Перекус 2", "Ужин"]
+    }
+    meal_names = names_map.get(meals_per_day, names_map[3])
 
-    # Преобразуем в JSON-строку для примера GPT
-    meal_names_json = ", ".join([f'{{"name": "{name}", "items": []}}' for name in meal_names])
+    # Целевые калории по каждому приёму
+    meal_targets = [
+        {"name": n, "target_calories": int(round(daily_calories * p / 100))}
+        for n, p in zip(meal_names, percents)
+    ]
 
-    # Подготовка запроса с четким указанием количества приемов пищи
+    # Базовый JSON-скелет для промпта
+    meal_names_json = ", ".join([f'{{"name": "{n}", "items": []}}' for n in meal_names])
+
+    # 🔥 Новый строгий промпт
     prompt = f"""
-Сгенерируй меню на один день с {meals_per_day} приёмами пищи для цели пользователя "{user_goal}" и КБЖУ:
+Составь меню на один день ({meals_per_day} приёмов пищи) для цели: "{user_goal}".
+Дневная цель (КБЖУ):
 - Калории: {daily_calories}
 - Белки: {protein_norm} г
 - Жиры: {fat_norm} г
 - Углеводы: {carbs_norm} г
-Пользовательские пожелания/ограничения: {prefs_and_restrictions}
+Ограничения и предпочтения: {prefs_and_restrictions}
 
-Важные правила:
-1. Каждый приём пищи должен содержать реальные продукты с количеством и КБЖУ (калории, белки, жиры, углеводы).
-2. Общее поле "totals" должно быть суммой всех блюд, которые ты сгенерировал. **Не копируй значения из нормы пользователя**.
-3. Норму КБЖУ нужно максимально близко достичь, но не превышать её.
-4. Если блюд меньше, чем заданное количество приёмов, добавь недостающие приёмы с подходящими блюдами.
-
-Названия приёмов пищи для {meals_per_day} приёмов: {meal_names_json}
-
-Строго верни валидный JSON с таким форматом:
+ОЧЕНЬ ВАЖНО — ПРАВИЛА:
+1) Верни строго **JSON** (никакого текста вне JSON).
+2) Поле "meals" = массив ровно из {meals_per_day} объектов:
+   {{
+     "name": "название приёма",
+     "items": [{{"product": "название", "quantity": "150 г", "calories": 200, "protein": 15, "fat": 5, "carbs": 20}}, ...],
+     "calories": число,
+     "protein": число,
+     "fat": число,
+     "carbs": число
+   }}
+3) Калории приёма ≈ его целевой доли:
+   {json.dumps(meal_targets, ensure_ascii=False)} (допуск ±10%).
+4) "calories" каждого приёма = сумма калорий его items.
+5) "totals" = сумма всех приёмов (calories/protein/fat/carbs). Не копируй норму.
+6) totals.calories должен быть в пределах {int(daily_calories*0.95)}–{int(daily_calories)} ккал.
+7) Используй реалистичные продукты и порции.
+8) Ответ — только JSON. Пример:
 {{
   "meals": [
     {meal_names_json}
-  ][:{meals_per_day}],
+  ],
   "totals": {{"calories": 0, "protein": 0, "fat": 0, "carbs": 0}}
 }}
-Ответ только JSON, без объяснений.
 """
-
 
     payload = {
         "modelUri": f"gpt://{folder_id}/yandexgpt/rc",
-        "completionOptions": {"temperature": 0.7, "maxTokens": 1200},
+        "completionOptions": {"temperature": 0.7, "maxTokens": 1400},
         "messages": [{"role": "user", "text": prompt}]
     }
 
-    logger.info(f"GPT request start: goal={user_goal}, meals_per_day={meals_per_day}")
-    logger.debug(f"GPT prompt prepared: {prompt[:300]}...")
-
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(url, json=payload, headers=headers, timeout=60) as resp:
-                logger.info(f"Response status YandexGPT: {resp.status}")
+    # --- Вспомогательные функции ---
+    async def send_request(pl):
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=pl, headers=headers, timeout=60) as resp:
+                txt = await resp.text()
                 if resp.status != 200:
-                    text = await resp.text()
-                    logger.error(f"Error GPT response: {text}")
-                    raise RuntimeError(f"GPT error {resp.status}: {text}")
-                result = await resp.json()
-                logger.debug(f"Raw GPT response: {json.dumps(result)[:500]}...")
-        except Exception as e:
-            logger.error(f"Network error while connecting to GPT: {e}")
-            raise RuntimeError(f"Ошибка сети при запросе к GPT: {e}")
+                    raise RuntimeError(f"GPT error {resp.status}: {txt}")
+                js = await resp.json()
+                try:
+                    return js["result"]["alternatives"][0]["message"]["text"]
+                except Exception:
+                    return txt
 
-    try:
-        result_text = result['result']['alternatives'][0]['message']['text'].strip()
-        logger.info(f"Raw GPT text received (first 300 chars): {result_text[:300]}")
-    except Exception as e:
-        logger.error(f"Error extracting GPT text: {e}")
-        raise RuntimeError(f"Ошибка разбора ответа GPT: {e}")
+    def extract_json_substring(text: str):
+        text = re.sub(r"^```[\w]*\n", "", text)
+        text = re.sub(r"\n```$", "", text)
+        match = re.search(r'(\{.*\}|\[.*\])', text, flags=re.S)
+        if not match:
+            raise ValueError("JSON not found")
+        return match.group(0)
 
-    try:
-        clean_text = re.sub(r"^```[\w]*\n?|```$", "", result_text).strip()
-        menu_data = json.loads(clean_text)
-        logger.info("GPT response successfully parsed as JSON")
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {e}\nResponse text: {clean_text[:500]}")
-        raise RuntimeError(f"Ошибка декодирования JSON от GPT: {e}")
+    def parse_num(v):
+        if isinstance(v, (int, float)):
+            return float(v)
+        m = re.search(r"[-+]?\d+(?:[.,]\d+)?", str(v))
+        return float(m.group(0).replace(",", ".")) if m else 0.0
 
-    # Коррекция количества приемов пищи
-    if len(menu_data.get("meals", [])) != meals_per_day:
-        menu_data["meals"] = menu_data.get("meals", [])[:meals_per_day]
-        logger.warning(f"Adjusted meals count to {meals_per_day}")
+    def recompute(md: dict):
+        totals = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
+        for meal in md.get("meals", []):
+            cal = prot = fat = ch = 0
+            for it in meal.get("items", []):
+                cal += parse_num(it.get("calories"))
+                prot += parse_num(it.get("protein"))
+                fat += parse_num(it.get("fat"))
+                ch += parse_num(it.get("carbs"))
+            meal["calories"] = int(round(cal))
+            meal["protein"] = round(prot, 1)
+            meal["fat"] = round(fat, 1)
+            meal["carbs"] = round(ch, 1)
+            totals["calories"] += cal
+            totals["protein"] += prot
+            totals["fat"] += fat
+            totals["carbs"] += ch
+        md["totals"] = {
+            "calories": int(round(totals["calories"])),
+            "protein": round(totals["protein"], 1),
+            "fat": round(totals["fat"], 1),
+            "carbs": round(totals["carbs"], 1),
+        }
+        return md
 
-    return menu_data
+    # --- Первый запрос ---
+    raw = await send_request(payload)
+    menu = json.loads(extract_json_substring(raw))
+    menu = recompute(menu)
+
+    # --- Финальная нормализация ---
+    total_cal = menu["totals"]["calories"]
+    if total_cal > daily_calories:
+        # Скейлим вниз
+        scale = daily_calories / total_cal
+        for meal in menu["meals"]:
+            for it in meal["items"]:
+                for k in ("calories", "protein", "fat", "carbs"):
+                    it[k] = int(it[k]*scale) if k=="calories" else round(it[k]*scale, 1)
+        menu = recompute(menu)
+
+    elif total_cal < daily_calories*0.95:
+        # Один ретрай: просим увеличить
+        retry_prompt = prompt + f"\n\nВ предыдущем варианте было {total_cal} ккал. Увеличь порции/блюда так, чтобы получилось {int(daily_calories*0.95)}–{int(daily_calories)} ккал."
+        payload["messages"] = [{"role": "user", "text": retry_prompt}]
+        raw2 = await send_request(payload)
+        menu2 = recompute(json.loads(extract_json_substring(raw2)))
+        if abs(daily_calories - menu2["totals"]["calories"]) < abs(daily_calories - total_cal):
+            menu = menu2
+
+    return menu
